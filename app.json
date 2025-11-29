@@ -1,0 +1,49 @@
+{
+  "expo": {
+    "name": "Tennis Tacherting",
+    "slug": "tennis-booking",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "de.teg.tennistacherting"
+    },
+    "android": {
+      "package": "de.teg.tennistacherting",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#001738"
+      }
+    },
+    "web": {
+  "bundler": "metro",
+  "favicon": "./assets/icon.png",
+  "name": "Tennis Tacherting",
+  "shortName": "T Tennis",
+  "themeColor": "#001738",
+  "backgroundColor": "#001738",
+  "display": "standalone"
+}
+,
+    "extra": {
+      "eas": {
+        "projectId": "b23dac64-f3dc-44d4-bf94-79cd09c7d26f"
+      }
+    }
+  }
+}
