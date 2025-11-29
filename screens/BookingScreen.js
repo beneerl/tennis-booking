@@ -120,6 +120,19 @@ export default function BookingScreen({ route, navigation }) {
       Alert.alert("DB-Fehler (Exception)", String(e));
     }
   };
+useEffect(() => {
+  loadWeeklyRules();
+}, []);
+
+// ======= AUTO REFRESH ALLE 5 SEKUNDEN =======
+useEffect(() => {
+  const interval = setInterval(() => {
+    loadBookingsForDate(currentDateKey);
+    loadWeeklyRules();
+  }, 5000); // 5 Sekunden
+
+  return () => clearInterval(interval);
+}, [currentDateKey]);
 
   useEffect(() => {
     loadBookingsForDate(currentDateKey);
@@ -708,7 +721,7 @@ const styles = StyleSheet.create({
   },
 
   // Modal
-  modalOverlay: {
+   modalOverlay: {
     position: "absolute",
     left: 0,
     right: 0,
@@ -716,15 +729,20 @@ const styles = StyleSheet.create({
     top: 0,
     backgroundColor: "rgba(0,0,0,0.45)",
     justifyContent: "flex-end",
+    alignItems: "center",      // Modal zentriert horizontal
   },
   modalBox: {
     backgroundColor: "#001e4f",
     paddingHorizontal: 20,
-    paddingVertical: 18,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
+    paddingTop: 18,
+    paddingBottom: 30,         // genug Platz für die Buttons
+    borderRadius: 22,          // alle 4 Ecken rund
     minHeight: 260,
+    width: "96%",              // kleiner als Bildschirmbreite
+    marginBottom: 24,          // Abstand zur Samsung-Leiste unten
   },
+
+
   modalTitle: {
     color: "#ffffff",
     fontSize: 20,
