@@ -1,3 +1,4 @@
+// screens/LoginScreen.js
 import React, { useState, useEffect } from "react";
 import {
   View,
@@ -6,136 +7,228 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   StatusBar,
+  Platform,
+  Alert,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../supabaseClient";
 
+// Alerts, die auf Web UND Handy funktionieren
+function showMessage(title, message) {
+  if (Platform.OS === "web") {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+}
+
 export default function LoginScreen({ navigation }) {
+  const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Auto-Login, wenn schon gespeichert
+  // 🔁 Auto-Login: wenn user_login in AsyncStorage liegt, direkt weiter
   useEffect(() => {
     const loadStoredUser = async () => {
       try {
         const json = await AsyncStorage.getItem("user_login");
-        if (json) {
-          const user = JSON.parse(json);
-          navigation.replace("Booking", {
-            userName: user.name,
-            isAdmin: user.is_admin,
-          });
-        }
+        if (!json) return;
+
+        const stored = JSON.parse(json);
+
+        navigation.replace("Booking", {
+          userName: stored.name,
+          isAdmin: stored.is_admin,
+        });
       } catch (e) {
         console.log("Error reading stored user:", e);
       }
     };
+
     loadStoredUser();
-  }, []);
+  }, [navigation]);
+
+  // 🧹 Immer wenn der Login-Screen wieder im Fokus ist: Felder leeren
+  useFocusEffect(
+    React.useCallback(() => {
+      setEmail("");
+      setName("");
+      setPin("");
+      setLoading(false);
+    }, [])
+  );
 
   const handleLogin = async () => {
+    const trimmedEmail = email.trim().toLowerCase();
     const trimmedName = name.trim();
     const trimmedPin = pin.trim();
 
-    if (!trimmedName || !trimmedPin) {
-      Alert.alert("Fehlende Angaben", "Bitte Name und PIN eingeben.");
+    if (!trimmedEmail || !trimmedName || !trimmedPin) {
+      showMessage("Fehlende Angaben", "Bitte E-Mail, Name und PIN eingeben.");
       return;
     }
 
     setLoading(true);
 
     try {
-      // 1. Prüfen, ob es den Namen schon gibt (Name eindeutig)
-      const { data, error } = await supabase
+      // 1) Gibt es schon einen User mit dieser E-Mail?
+      const { data: existingUsers, error: existingError } = await supabase
         .from("users")
         .select("*")
-        .eq("name", trimmedName);
+        .eq("email", trimmedEmail)
+        .order("created_at", { ascending: false }); // neuester Eintrag zuerst
 
-      if (error) {
-        console.log("Supabase users error:", error.message);
+      if (existingError) {
+        console.log("existingError:", existingError.message);
+        showMessage("Fehler", "Benutzerabfrage fehlgeschlagen.");
+        setLoading(false);
+        return;
       }
 
-      const existingUser = data && data.length > 0 ? data[0] : null;
+      const existingUser =
+        existingUsers && existingUsers.length > 0 ? existingUsers[0] : null;
 
-      // A) User existiert → Login
+      // --------------------------------------------------------
+      // FALL A: User existiert -> NUR EINLOGGEN
+      // --------------------------------------------------------
       if (existingUser) {
-        if (existingUser.pin !== trimmedPin) {
-          Alert.alert(
-            "PIN falsch",
-            "Der Name ist bereits registriert, aber die PIN ist falsch."
-          );
+        const { data: signInData, error: signInError } =
+          await supabase.auth.signInWithPassword({
+            email: trimmedEmail,
+            password: trimmedPin,
+          });
+
+        if (signInError) {
+          console.log("signInError:", signInError.message);
+          const msg = (signInError.message || "").toLowerCase();
+
+          if (msg.includes("invalid login credentials")) {
+            showMessage(
+              "Login fehlgeschlagen",
+              "PIN oder E-Mail ist falsch."
+            );
+          } else {
+            showMessage("Login fehlgeschlagen", signInError.message);
+          }
+
           setLoading(false);
           return;
         }
 
-        if (existingUser.status === "blocked") {
-          Alert.alert(
+        // Status & Admin robust normalisieren
+        const rawStatus = existingUser.status;
+        const status =
+          rawStatus === null || rawStatus === undefined
+            ? ""
+            : String(rawStatus).trim().toLowerCase();
+        const isAdmin = !!existingUser.is_admin;
+
+        console.log("LOGIN STATUS CHECK:", {
+          email: trimmedEmail,
+          rawStatus,
+          status,
+          isAdmin,
+        });
+
+        if (status === "blocked") {
+          showMessage(
             "Gesperrt",
             "Dein Zugang wurde vom Admin gesperrt. Bitte wende dich an den Verein."
           );
+          await supabase.auth.signOut();
           setLoading(false);
           return;
         }
 
-        if (existingUser.status !== "approved" && !existingUser.is_admin) {
-          Alert.alert(
+        if (status !== "approved" && !isAdmin) {
+          showMessage(
             "Noch nicht freigeschaltet",
             "Dein Konto wurde noch nicht vom Admin freigegeben."
           );
+          await supabase.auth.signOut();
           setLoading(false);
           return;
         }
 
+        // ✅ Erfolgreich eingeloggt → lokal merken für Auto-Login
         await AsyncStorage.setItem(
           "user_login",
           JSON.stringify({
-            id: existingUser.id,
+            email: trimmedEmail,
             name: existingUser.name,
-            is_admin: existingUser.is_admin,
+            is_admin: isAdmin,
           })
         );
 
+        showMessage(
+          "Login erfolgreich",
+          "Willkommen, " + existingUser.name + "!"
+        );
         navigation.replace("Booking", {
           userName: existingUser.name,
-          isAdmin: existingUser.is_admin,
+          isAdmin: isAdmin,
         });
         setLoading(false);
         return;
       }
 
-      // B) User existiert noch nicht → Registrierung (immer normaler User)
-      const { data: inserted, error: insertError } = await supabase
-        .from("users")
-        .insert({
-          name: trimmedName,
-          pin: trimmedPin,
-          is_admin: false,        // <--- NEU: niemals automatisch Admin
-          status: "pending",      // muss von dir freigegeben werden
-        })
-        .select()
-        .single();
+      // --------------------------------------------------------
+      // FALL B: User existiert noch nicht -> REGISTRIEREN
+      // --------------------------------------------------------
+      const { data: signUpData, error: signUpError } =
+        await supabase.auth.signUp({
+          email: trimmedEmail,
+          password: trimmedPin,
+        });
 
-      if (insertError) {
-        console.log("Insert user error:", insertError.message);
-        Alert.alert(
-          "Fehler",
-          "Konto konnte nicht erstellt werden. Bitte später erneut versuchen."
+      if (signUpError) {
+        console.log("signUpError:", signUpError.message);
+        showMessage("Registrierung fehlgeschlagen", signUpError.message);
+        setLoading(false);
+        return;
+      }
+
+      if (!signUpData || !signUpData.user) {
+        showMessage(
+          "Registrierung fehlgeschlagen",
+          "Keine Nutzerdaten von Supabase erhalten."
         );
         setLoading(false);
         return;
       }
 
-      Alert.alert(
+      const authUser = signUpData.user;
+
+      const { error: insertError } = await supabase.from("users").insert({
+        auth_id: authUser.id,
+        email: trimmedEmail,
+        name: trimmedName,
+        status: "pending",
+        is_admin: false,
+      });
+
+      if (insertError) {
+        console.log("insertError:", insertError.message);
+        showMessage(
+          "Fehler",
+          "User registriert, aber Profil konnte nicht gespeichert werden: " +
+            insertError.message
+        );
+        setLoading(false);
+        return;
+      }
+
+      showMessage(
         "Registriert",
         "Dein Konto wurde angelegt und muss vom Admin freigeschaltet werden."
       );
       setLoading(false);
-    } catch (e) {
-      console.log("Login exception:", e);
-      Alert.alert("Fehler", "Es ist ein Fehler aufgetreten.");
+    } catch (err) {
+      console.log("handleLogin exception:", err);
+      showMessage("Fehler", err.message || String(err));
       setLoading(false);
     }
   };
@@ -149,6 +242,17 @@ export default function LoginScreen({ navigation }) {
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Anmeldung</Text>
 
+        <Text style={styles.label}>E-Mail</Text>
+        <TextInput
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+          placeholder="z.B. bene@example.com"
+          placeholderTextColor="#9fb0c8"
+          keyboardType="email-address"
+          autoCapitalize="none"
+        />
+
         <Text style={styles.label}>Name</Text>
         <TextInput
           style={styles.input}
@@ -158,12 +262,12 @@ export default function LoginScreen({ navigation }) {
           placeholderTextColor="#9fb0c8"
         />
 
-        <Text style={styles.label}>PIN</Text>
+        <Text style={styles.label}>Passwort</Text>
         <TextInput
           style={styles.input}
           value={pin}
           onChangeText={setPin}
-          placeholder="Eigene 4-stellige PIN"
+          placeholder="min. 6 Zeichen"
           placeholderTextColor="#9fb0c8"
           secureTextEntry
         />
@@ -181,8 +285,8 @@ export default function LoginScreen({ navigation }) {
         </TouchableOpacity>
 
         <Text style={styles.infoText}>
-          Neue Spieler werden automatisch registriert und anschließend vom
-          Admin freigeschaltet.
+          Neue Spieler werden registriert und anschließend vom Admin
+          freigeschaltet. Login erfolgt mit E-Mail + PIN.
         </Text>
       </View>
     </View>
