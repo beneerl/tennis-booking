@@ -24,31 +24,100 @@ function showMessage(title, message) {
   }
 }
 
+async function clearLocalLogin() {
+  try {
+    await supabase.auth.signOut();
+  } catch {}
+  try {
+    await AsyncStorage.removeItem("user_login");
+  } catch {}
+}
+
+async function loadUserByEmail(email) {
+  const { data, error } = await supabase
+    .from("users")
+    .select("*")
+    .eq("email", email)
+    .order("created_at", { ascending: false }); // neuester Eintrag zuerst
+  if (error) throw error;
+  return data && data.length > 0 ? data[0] : null;
+}
+
+function normalizeStatus(rawStatus) {
+  return rawStatus === null || rawStatus === undefined
+    ? ""
+    : String(rawStatus).trim().toLowerCase();
+}
+
 export default function LoginScreen({ navigation }) {
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // 🔁 Auto-Login: wenn user_login in AsyncStorage liegt, direkt weiter
+  // 🔁 Auto-Login: Session/AsyncStorage prüfen, ABER Status in DB verifizieren
   useEffect(() => {
-    const loadStoredUser = async () => {
+    const bootstrap = async () => {
       try {
-        const json = await AsyncStorage.getItem("user_login");
-        if (!json) return;
+        // 1) Supabase Session prüfen
+        const { data: sessionData } = await supabase.auth.getSession();
+        const sessionEmail = sessionData?.session?.user?.email
+          ? String(sessionData.session.user.email).toLowerCase()
+          : null;
 
-        const stored = JSON.parse(json);
+        // 2) Fallback: AsyncStorage
+        const json = await AsyncStorage.getItem("user_login");
+        const stored = json ? JSON.parse(json) : null;
+        const storedEmail = stored?.email ? String(stored.email).toLowerCase() : null;
+
+        const emailToCheck = sessionEmail || storedEmail;
+        if (!emailToCheck) return;
+
+        // 3) User in DB laden + Status checken
+        const u = await loadUserByEmail(emailToCheck);
+        if (!u) {
+          await clearLocalLogin();
+          return;
+        }
+
+        const status = normalizeStatus(u.status);
+        const isAdmin = !!u.is_admin;
+
+        if (status === "blocked") {
+          await clearLocalLogin();
+          showMessage(
+            "Gesperrt",
+            "Dein Zugang wurde vom Admin gesperrt. Bitte wende dich an den Verein."
+          );
+          return;
+        }
+
+        if (status !== "approved" && !isAdmin) {
+          // pending -> bleibt im Login
+          await clearLocalLogin();
+          return;
+        }
+
+        // ✅ Auto-Login
+        await AsyncStorage.setItem(
+          "user_login",
+          JSON.stringify({
+            email: emailToCheck,
+            name: u.name,
+            is_admin: isAdmin,
+          })
+        );
 
         navigation.replace("Booking", {
-          userName: stored.name,
-          isAdmin: stored.is_admin,
+          userName: u.name,
+          isAdmin: isAdmin,
         });
       } catch (e) {
-        console.log("Error reading stored user:", e);
+        console.log("Auto-login bootstrap error:", e?.message || e);
       }
     };
 
-    loadStoredUser();
+    bootstrap();
   }, [navigation]);
 
   // 🧹 Immer wenn der Login-Screen wieder im Fokus ist: Felder leeren
@@ -66,123 +135,155 @@ export default function LoginScreen({ navigation }) {
     const trimmedName = name.trim();
     const trimmedPin = pin.trim();
 
-    if (!trimmedEmail || !trimmedName || !trimmedPin) {
-      showMessage("Fehlende Angaben", "Bitte E-Mail, Name und PIN eingeben.");
+    if (!trimmedEmail || !trimmedPin) {
+      showMessage("Fehlende Angaben", "Bitte E-Mail und Passwort eingeben.");
       return;
     }
 
     setLoading(true);
 
     try {
-      // 1) Gibt es schon einen User mit dieser E-Mail?
-      const { data: existingUsers, error: existingError } = await supabase
-        .from("users")
-        .select("*")
-        .eq("email", trimmedEmail)
-        .order("created_at", { ascending: false }); // neuester Eintrag zuerst
-
-      if (existingError) {
-        console.log("existingError:", existingError.message);
+      // 1) Gibt es schon einen User mit dieser E-Mail in deiner Tabelle?
+      let existingUser = null;
+      try {
+        existingUser = await loadUserByEmail(trimmedEmail);
+      } catch (existingError) {
+        console.log("existingError:", existingError?.message || existingError);
         showMessage("Fehler", "Benutzerabfrage fehlgeschlagen.");
         setLoading(false);
         return;
       }
 
-      const existingUser =
-        existingUsers && existingUsers.length > 0 ? existingUsers[0] : null;
-
       // --------------------------------------------------------
-      // FALL A: User existiert -> NUR EINLOGGEN
+      // FALL A: User existiert -> EINLOGGEN (mit Auto-Migration)
       // --------------------------------------------------------
       if (existingUser) {
-        const { data: signInData, error: signInError } =
-          await supabase.auth.signInWithPassword({
+        const doStatusAndGo = async (u) => {
+          const status = normalizeStatus(u.status);
+          const isAdmin = !!u.is_admin;
+
+          console.log("LOGIN STATUS CHECK:", {
             email: trimmedEmail,
-            password: trimmedPin,
+            rawStatus: u.status,
+            status,
+            isAdmin,
           });
 
-        if (signInError) {
-          console.log("signInError:", signInError.message);
-          const msg = (signInError.message || "").toLowerCase();
-
-          if (msg.includes("invalid login credentials")) {
+          if (status === "blocked") {
             showMessage(
-              "Login fehlgeschlagen",
-              "PIN oder E-Mail ist falsch."
+              "Gesperrt",
+              "Dein Zugang wurde vom Admin gesperrt. Bitte wende dich an den Verein."
             );
-          } else {
-            showMessage("Login fehlgeschlagen", signInError.message);
+            await clearLocalLogin();
+            setLoading(false);
+            return;
           }
 
+          if (status !== "approved" && !isAdmin) {
+            showMessage(
+              "Noch nicht freigeschaltet",
+              "Dein Konto wurde noch nicht vom Admin freigegeben."
+            );
+            await clearLocalLogin();
+            setLoading(false);
+            return;
+          }
+
+          // ✅ Erfolgreich eingeloggt → lokal merken für Auto-Login
+          await AsyncStorage.setItem(
+            "user_login",
+            JSON.stringify({
+              email: trimmedEmail,
+              name: u.name,
+              is_admin: isAdmin,
+            })
+          );
+
+          showMessage("Login erfolgreich", "Willkommen, " + u.name + "!");
+          navigation.replace("Booking", {
+            userName: u.name,
+            isAdmin: isAdmin,
+          });
           setLoading(false);
-          return;
-        }
+        };
 
-        // Status & Admin robust normalisieren
-        const rawStatus = existingUser.status;
-        const status =
-          rawStatus === null || rawStatus === undefined
-            ? ""
-            : String(rawStatus).trim().toLowerCase();
-        const isAdmin = !!existingUser.is_admin;
-
-        console.log("LOGIN STATUS CHECK:", {
+        // 1) Erst normaler Sign-In Versuch
+        const { error: signInError } = await supabase.auth.signInWithPassword({
           email: trimmedEmail,
-          rawStatus,
-          status,
-          isAdmin,
+          password: trimmedPin,
         });
 
-        if (status === "blocked") {
-          showMessage(
-            "Gesperrt",
-            "Dein Zugang wurde vom Admin gesperrt. Bitte wende dich an den Verein."
-          );
-          await supabase.auth.signOut();
+        if (signInError) {
+          const msg = (signInError.message || "").toLowerCase();
+          console.log("signInError:", signInError.message);
+
+          // Häufigster Fall: User in Tabelle existiert, aber Auth-Account existiert nicht (altbestand)
+          if (msg.includes("invalid login credentials")) {
+            // 2) Auto-Migration: einmal signUp versuchen
+            const { data: signUpData, error: signUpError } =
+              await supabase.auth.signUp({
+                email: trimmedEmail,
+                password: trimmedPin,
+              });
+
+            if (signUpError) {
+              const su = (signUpError.message || "").toLowerCase();
+              console.log("signUpError (migration):", signUpError.message);
+
+              if (su.includes("already registered")) {
+                showMessage("Login fehlgeschlagen", "Passwort oder E-Mail ist falsch.");
+              } else {
+                showMessage(
+                  "Login fehlgeschlagen",
+                  "Registrierung/Migration fehlgeschlagen: " + signUpError.message
+                );
+              }
+              setLoading(false);
+              return;
+            }
+
+            // 3) auth_id nachziehen (falls leer)
+            const newAuthId = signUpData?.user?.id;
+            if (newAuthId && !existingUser.auth_id) {
+              const { error: updErr } = await supabase
+                .from("users")
+                .update({ auth_id: newAuthId })
+                .eq("id", existingUser.id);
+
+              if (updErr) {
+                console.log("auth_id update error:", updErr.message);
+                // Nicht hart abbrechen – Login kann trotzdem funktionieren
+              }
+            }
+
+            // 4) Jetzt Status prüfen + rein
+            await doStatusAndGo(existingUser);
+            return;
+          }
+
+          showMessage("Login fehlgeschlagen", signInError.message);
           setLoading(false);
           return;
         }
 
-        if (status !== "approved" && !isAdmin) {
-          showMessage(
-            "Noch nicht freigeschaltet",
-            "Dein Konto wurde noch nicht vom Admin freigegeben."
-          );
-          await supabase.auth.signOut();
-          setLoading(false);
-          return;
-        }
-
-        // ✅ Erfolgreich eingeloggt → lokal merken für Auto-Login
-        await AsyncStorage.setItem(
-          "user_login",
-          JSON.stringify({
-            email: trimmedEmail,
-            name: existingUser.name,
-            is_admin: isAdmin,
-          })
-        );
-
-        showMessage(
-          "Login erfolgreich",
-          "Willkommen, " + existingUser.name + "!"
-        );
-        navigation.replace("Booking", {
-          userName: existingUser.name,
-          isAdmin: isAdmin,
-        });
-        setLoading(false);
+        // Sign-In ok -> Status prüfen + rein
+        await doStatusAndGo(existingUser);
         return;
       }
 
       // --------------------------------------------------------
       // FALL B: User existiert noch nicht -> REGISTRIEREN
       // --------------------------------------------------------
-      const { data: signUpData, error: signUpError } =
-        await supabase.auth.signUp({
-          email: trimmedEmail,
-          password: trimmedPin,
-        });
+      if (!trimmedName) {
+        showMessage("Fehlende Angaben", "Bitte Name angeben (nur bei Registrierung nötig).");
+        setLoading(false);
+        return;
+      }
+
+      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+        email: trimmedEmail,
+        password: trimmedPin,
+      });
 
       if (signUpError) {
         console.log("signUpError:", signUpError.message);
@@ -225,6 +326,7 @@ export default function LoginScreen({ navigation }) {
         "Registriert",
         "Dein Konto wurde angelegt und muss vom Admin freigeschaltet werden."
       );
+
       setLoading(false);
     } catch (err) {
       console.log("handleLogin exception:", err);
@@ -253,7 +355,7 @@ export default function LoginScreen({ navigation }) {
           autoCapitalize="none"
         />
 
-        <Text style={styles.label}>Name</Text>
+        <Text style={styles.label}>Name (nur bei neuer Registrierung)</Text>
         <TextInput
           style={styles.input}
           value={name}
@@ -286,7 +388,7 @@ export default function LoginScreen({ navigation }) {
 
         <Text style={styles.infoText}>
           Neue Spieler werden registriert und anschließend vom Admin
-          freigeschaltet. Login erfolgt mit E-Mail + PIN.
+          freigeschaltet. Login erfolgt mit E-Mail + Passwort.
         </Text>
       </View>
     </View>
