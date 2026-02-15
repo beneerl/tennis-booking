@@ -95,15 +95,102 @@ module.exports = async (req, res) => {
           html.includes("wa/"));
 
       if (!isForbidden && looksLikeNuLiga) {
+        const cheerio = require("cheerio");
+
+        const normalizeSpace = (s) => (s || "").replace(/\s+/g, " ").trim();
+
+        const parseHtmlTables = ($) => {
+          const tables = [];
+          $("table").each((_, table) => {
+            const rows = [];
+            $(table)
+              .find("tr")
+              .each((__, tr) => {
+                const cells = [];
+                $(tr)
+                  .find("th,td")
+                  .each((___, td) => cells.push(normalizeSpace($(td).text())));
+                if (cells.some((c) => c.length)) rows.push(cells);
+              });
+            if (rows.length) tables.push(rows);
+          });
+          return tables;
+        };
+
+        const guessRankingTable = (allTables) => {
+          for (const t of allTables) {
+            const header = (t[0] || []).join(" | ").toLowerCase();
+            if (
+              header.includes("rang") &&
+              header.includes("mannschaft") &&
+              (header.includes("punkte") || header.includes("begegn"))
+            ) {
+              return t;
+            }
+          }
+          return null;
+        };
+
+        const guessMatchesTable = (allTables) => {
+          for (const t of allTables) {
+            const header = (t[0] || []).join(" | ").toLowerCase();
+            if (
+              header.includes("datum") ||
+              header.includes("uhr") ||
+              header.includes("begegn") ||
+              (header.includes("heim") && header.includes("gast"))
+            ) {
+              return t;
+            }
+          }
+          return null;
+        };
+
+        const tableToObjects = (table) => {
+          if (!table || table.length < 2) return [];
+          const headers = table[0].map((h) => normalizeSpace(h).toLowerCase());
+          return table.slice(1).map((row) => {
+            const obj = {};
+            headers.forEach((h, i) => {
+              obj[h || `col_${i}`] = row[i] ?? "";
+            });
+            return obj;
+          });
+        };
+
+        log("parse html with cheerio");
+        const $ = cheerio.load(html);
+
+        const title =
+          normalizeSpace($("h1").first().text()) || normalizeSpace($("title").text());
+
+        const allTables = parseHtmlTables($);
+        const rankingTable = guessRankingTable(allTables);
+        const matchesTable = guessMatchesTable(allTables);
+
+        const table = rankingTable ? tableToObjects(rankingTable) : [];
+        const matches = matchesTable ? tableToObjects(matchesTable) : [];
+
+        const status = table.length || matches.length ? "ACTIVE" : "PENDING";
+
         return res.status(200).json({
           ok: true,
           teamId,
-          picked_url: url,
-          status_code: r.status,
+          status,
+          title,
+          source_url: url,
           ms: Date.now() - t0,
           cookies_used: setCookies.length,
-          html_preview: preview,
+          parsed: {
+            tables_found: allTables.length,
+            used_ranking_table: !!rankingTable,
+            used_matches_table: !!matchesTable,
+          },
+          table,
+          matches,
+          next_matches: matches.slice(0, 3),
         });
+
       }
 
       // keep debug info if none works
