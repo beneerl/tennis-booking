@@ -28,8 +28,17 @@ const linking = {
 };
 
 export default function App() {
+  // ✅ Web: iOS/PWA "appiger" machen (kein Seitenrand, weniger Bounce/Scroll-Kette)
+  if (Platform.OS === "web" && typeof document !== "undefined") {
+    document.documentElement.style.height = "100%";
+    document.body.style.height = "100%";
+    document.body.style.margin = "0";
+    document.body.style.overscrollBehavior = "none";
+  }
+
   return (
     <NavigationContainer linking={Platform.OS === "web" ? linking : undefined}>
+
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="Booking" component={BookingScreen} />
