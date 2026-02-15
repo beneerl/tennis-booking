@@ -159,6 +159,9 @@ async function main() {
     const text = pdfToText(pdfPath);
 
     const payload = buildPayload(teamId, text);
+    console.log("payload keys:", Object.keys(payload));
+console.log("table len:", payload.table.length, "matches len:", payload.matches.length);
+
 
     const { error } = await supabase.from("team_cache").upsert({
       team_id: teamId,
