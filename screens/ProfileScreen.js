@@ -29,11 +29,14 @@ export default function ProfileScreen({ navigation }) {
         setUser(u);
 
         // PIN laden
-        const { data: userRow, error: userErr } = await supabase
-          .from("users")
-          .select("pin")
-          .eq("id", u.id)
-          .single();
+const { data: userRow, error: userErr } = await supabase
+  .from("users")
+  .select("pin")
+  .eq("email", u.email)
+  .order("created_at", { ascending: false })
+  .limit(1)
+  .maybeSingle();
+
 
         if (userErr) {
           console.log("Supabase user pin error:", userErr.message);
@@ -69,17 +72,27 @@ export default function ProfileScreen({ navigation }) {
     load();
   }, []);
 
-  const handleLogout = async () => {
-    try {
-      await AsyncStorage.removeItem("user_login");
-    } catch (e) {
-      console.log("Error clearing user:", e);
-    }
-    navigation.reset({
-      index: 0,
-      routes: [{ name: "Login" }],
-    });
-  };
+const handleLogout = async () => {
+  try {
+    // 1) Erst local Auto-Login killen
+    await AsyncStorage.removeItem("user_login");
+  } catch (e) {
+    console.log("Error clearing user_login:", e);
+  }
+
+  try {
+    // 2) Dann Supabase Session wirklich beenden (wichtig für Web)
+    await supabase.auth.signOut();
+  } catch (e) {
+    console.log("Error signing out:", e);
+  }
+
+  // 3) Navigation hart zurück auf Login
+  navigation.reset({
+    index: 0,
+    routes: [{ name: "Login" }],
+  });
+};
 
   if (loading) {
     return (
