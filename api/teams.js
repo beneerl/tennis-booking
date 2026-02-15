@@ -1,9 +1,6 @@
 // api/teams.js
-// Serverless endpoint: /api/teams?teamId=herren_w1
-// Purpose (debug step): fetch PDF -> extract text using pdfjs-dist (no canvas) -> return preview JSON
-
-const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.mjs");
-
+// /api/teams?teamId=herren_w1
+// Fetch PDF -> extract text via pdfjs-dist (ESM) using dynamic import (works in CJS)
 
 const TEAM_MAP = {
   herren_w1: {
@@ -12,7 +9,18 @@ const TEAM_MAP = {
   },
 };
 
+// dynamic import cache
+let pdfjsPromise = null;
+async function getPdfjs() {
+  if (!pdfjsPromise) {
+    pdfjsPromise = import("pdfjs-dist/legacy/build/pdf.mjs");
+  }
+  return pdfjsPromise;
+}
+
 async function extractTextFromPdf(arrayBuffer) {
+  const pdfjsLib = await getPdfjs();
+
   const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
   const pdf = await loadingTask.promise;
 
@@ -20,8 +28,7 @@ async function extractTextFromPdf(arrayBuffer) {
   for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
     const page = await pdf.getPage(pageNum);
     const content = await page.getTextContent();
-    const pageText = content.items.map((it) => it.str).join(" ");
-    fullText += pageText + "\n";
+    fullText += content.items.map((it) => it.str).join(" ") + "\n";
   }
   return fullText;
 }
@@ -37,7 +44,7 @@ module.exports = async (req, res) => {
     const cfg = TEAM_MAP[teamId];
     if (!cfg) return res.status(404).json({ error: "unknown_teamId", teamId });
 
-    // Fetch PDF with timeout
+    // fetch with timeout
     log("fetch pdf");
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 15000);
@@ -72,6 +79,7 @@ module.exports = async (req, res) => {
     return res.status(500).json({
       error: "internal_error",
       message: err?.message || String(err),
+      stack: (err?.stack || "").split("\n").slice(0, 6),
     });
   }
 };
