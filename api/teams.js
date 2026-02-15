@@ -79,28 +79,46 @@ function tableToObjects(table) {
 }
 
 // Extract nuLiga groupPage URL from PDF binary text
-function extractGroupPageUrlFromPdfBytes(pdfBytes, fallbackGroupId) {
-  // Many PDFs contain full URLs as plain text
+function extractGroupPageUrlFromPdfBytes(pdfBytes, groupId) {
   const s = Buffer.from(pdfBytes).toString("latin1");
 
-  // 1) try full URL
+  // 1) Try to find a full groupPage URL (rare)
   let m = s.match(/https?:\/\/[a-z0-9.-]+\/cgi-bin\/WebObjects\/nuLigaTENDE\.woa\/wa\/groupPage\?[^"'<> \r\n]+/i);
-  if (m && m[0]) return m[0];
+  if (m?.[0]) return m[0];
 
-  // 2) try relative URL
-  m = s.match(/\/cgi-bin\/WebObjects\/nuLigaTENDE\.woa\/wa\/groupPage\?[^"'<> \r\n]+/i);
-  if (m && m[0]) return `https://btv.liga.nu${m[0]}`;
+  // 2) Try to find 'championship' parameter in different encodings
+  // Common encodings: "championship=XYZ", "championship%3DXYZ", "championship%253DXYZ"
+  const patterns = [
+    /championship=([A-Za-z0-9._%+\-]+(?:%2F[A-Za-z0-9._%+\-]+)*)/i,
+    /championship%3D([A-Za-z0-9._%+\-]+(?:%2F[A-Za-z0-9._%+\-]+)*)/i,
+    /championship%253D([A-Za-z0-9._%+\-]+(?:%252F[A-Za-z0-9._%+\-]+)*)/i,
+  ];
 
-  // 3) last resort: sometimes only championship appears, build url
-  // If we can find championship=... inside PDF, we can build the URL.
-  const c = s.match(/championship=([A-Za-z0-9+.%/_ -]+)/i);
-  if (c && c[1] && fallbackGroupId) {
-    const champ = c[1];
-    return `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?championship=${champ}&group=${fallbackGroupId}`;
+  let champ = null;
+  for (const re of patterns) {
+    const mm = s.match(re);
+    if (mm?.[1]) {
+      champ = mm[1];
+      break;
+    }
+  }
+
+  // If we found something, normalize double-encoding a bit
+  if (champ) {
+    // decode once if it looks encoded (safe try)
+    try {
+      champ = decodeURIComponent(champ);
+    } catch {}
+    // re-encode to be safe in URL
+    champ = encodeURIComponent(champ);
+    return `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?championship=${champ}&group=${encodeURIComponent(
+      groupId
+    )}`;
   }
 
   return null;
 }
+
 
 module.exports = async (req, res) => {
   const t0 = Date.now();
@@ -127,12 +145,16 @@ module.exports = async (req, res) => {
     log("extract groupPage url from pdf bytes");
     const groupPageUrl = extractGroupPageUrlFromPdfBytes(pdfBytes, "2115082");
     if (!groupPageUrl) {
-      return res.status(200).json({
-        ok: false,
-        status: "PENDING",
-        reason: "groupPage_url_not_found_in_pdf",
-        pdf_url: cfg.pdf_url,
-      });
+return res.status(200).json({
+  ok: false,
+  status: "PENDING",
+  reason: "groupPage_url_not_found_in_pdf",
+  pdf_url: cfg.pdf_url,
+  debug: {
+    has_championship_word: Buffer.from(pdfBytes).toString("latin1").includes("championship"),
+    has_group_word: Buffer.from(pdfBytes).toString("latin1").includes("group"),
+  },
+});
     }
 
     // 3) fetch nuLiga HTML
