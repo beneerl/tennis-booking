@@ -39,7 +39,8 @@ module.exports = async (req, res) => {
     if (!cfg) return res.status(404).json({ error: "unknown_teamId", teamId });
 
     // 1) Warmup request to create session + get cookies
-    const homeUrl = "https://btv.liga.nu/";
+    const homeUrl = "https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/default";
+
     log("warmup session");
     const homeResp = await fetch(homeUrl, {
       headers: { "user-agent": "Mozilla/5.0" },
@@ -95,6 +96,7 @@ module.exports = async (req, res) => {
           html.includes("wa/"));
 
       if (!isForbidden && looksLikeNuLiga) {
+        const finalUrl = r.url;
         const cheerio = require("cheerio");
 
         const normalizeSpace = (s) => (s || "").replace(/\s+/g, " ").trim();
@@ -176,6 +178,9 @@ module.exports = async (req, res) => {
         return res.status(200).json({
           ok: true,
           teamId,
+            picked_url: url,
+            final_url: finalUrl,          // <-- DAS ist Step 2
+            status_code: r.status,
           status,
           title,
           source_url: url,
@@ -189,6 +194,7 @@ module.exports = async (req, res) => {
           table,
           matches,
           next_matches: matches.slice(0, 3),
+          html_preview: html.slice(0, 500),
         });
 
       }
