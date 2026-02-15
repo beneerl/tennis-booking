@@ -13,15 +13,23 @@ const TEAM_MAP = {
 let pdfjsPromise = null;
 async function getPdfjs() {
   if (!pdfjsPromise) {
-    pdfjsPromise = import("pdfjs-dist/legacy/build/pdf.mjs");
+    pdfjsPromise = import("pdfjs-dist/build/pdf.mjs");
+
   }
   return pdfjsPromise;
 }
 
 async function extractTextFromPdf(arrayBuffer) {
   const pdfjsLib = await getPdfjs();
+// disable worker in serverless/node
+pdfjsLib.GlobalWorkerOptions.workerSrc = null;
 
-  const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
+  const loadingTask = pdfjsLib.getDocument({
+  data: new Uint8Array(arrayBuffer),
+  disableWorker: true,
+  useSystemFonts: true,
+});
+
   const pdf = await loadingTask.promise;
 
   let fullText = "";
