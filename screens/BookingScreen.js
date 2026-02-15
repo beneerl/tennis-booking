@@ -42,6 +42,13 @@ function confirmDelete(title, message) {
   if (Platform.OS === "web") {
     return Promise.resolve(window.confirm(message));
   }
+function showMessage(title, message) {
+  if (Platform.OS === "web") {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+}
 
   return new Promise((resolve) => {
     Alert.alert(title, message, [
@@ -312,24 +319,21 @@ useEffect(() => {
         return;
       }
 
-      Alert.alert(
-        "Buchung löschen?",
-        `Möchtest du diese Buchung wirklich löschen?\n\nPlatz: ${courtName}\nDatum: ${dateLabel}\nZeit: ${time}\nSpieler: ${existing.userName}${
-          existing.coPlayerName ? " / " + existing.coPlayerName : ""
-        }`,
-        [
-          { text: "Abbrechen", style: "cancel" },
-          {
-            text: "Löschen",
-            style: "destructive",
-            onPress: async () => {
-              setBookings((prev) => prev.filter((b) => b.id !== id));
-              await deleteBookingFromSupabase(courtIndex, time);
-            },
-          },
-        ]
-      );
+      (async () => {
+        const ok = await confirmDelete(
+          "Buchung löschen?",
+          `Möchtest du diese Buchung wirklich löschen?\n\nPlatz: ${courtName}\nDatum: ${dateLabel}\nZeit: ${time}\nSpieler: ${existing.userName}${
+            existing.coPlayerName ? " / " + existing.coPlayerName : ""
+          }`
+        );
+
+        if (!ok) return;
+
+        setBookings((prev) => prev.filter((b) => b.id !== id));
+        await deleteBookingFromSupabase(courtIndex, time);
+      })();
       return;
+
     }
 
     // 2) Slot ist gesperrt
