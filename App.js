@@ -7,24 +7,28 @@ import LoginScreen from "./screens/LoginScreen";
 import BookingScreen from "./screens/BookingScreen";
 import AdminSettingsScreen from "./screens/AdminSettingsScreen";
 import ProfileScreen from "./screens/ProfileScreen";
+import TeamsScreen from "./screens/TeamsScreen";
+import TeamDetailsScreen from "./screens/TeamDetailsScreen";
 
 const Stack = createNativeStackNavigator();
 
 // ✅ Web URL-Routing / PWA support
 const linking = {
-  prefixes: [
-    // Für Web reicht meistens der Root
-    // Wenn du später eine eigene Domain nutzt, kannst du sie hier ergänzen.
-    ""
-  ],
-  config: {
-    screens: {
-      Login: "",
-      Booking: "booking",
-      AdminSettings: "admin",
-      Profile: "profile",
-    },
+prefixes: Platform.OS === "web" && typeof window !== "undefined"
+  ? [window.location.origin]
+  : [""],
+
+config: {
+  screens: {
+    Login: "",
+    Booking: "booking",
+    AdminSettings: "admin",
+    Profile: "profile",
+    Teams: "teams",
+    TeamDetails: "teams/:teamId",
   },
+},
+
 };
 
 export default function App() {
@@ -44,6 +48,8 @@ export default function App() {
         <Stack.Screen name="Booking" component={BookingScreen} />
         <Stack.Screen name="AdminSettings" component={AdminSettingsScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
+        <Stack.Screen name="Teams" component={TeamsScreen} />
+        <Stack.Screen name="TeamDetails" component={TeamDetailsScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );

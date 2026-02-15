@@ -454,33 +454,52 @@ useEffect(() => {
 
   return (
     <View style={styles.container}>
+      <Text style={{ color: "yellow", fontWeight: "800", padding: 6 }}>
+  BOOKING DEBUG ✅
+</Text>
+
       <StatusBar barStyle="light-content" />
 
-      {/* oben: nur Admin/Profil rechts */}
-      <View style={styles.infoRow}>
-        <View style={{ flex: 1 }} />
-        <View style={styles.infoButtons}>
-          {isAdmin && (
-            <TouchableOpacity
-              style={styles.adminBtn}
-              onPress={() =>
-                navigation.navigate("AdminSettings", {
-                  userName,
-                  isAdmin,
-                })
-              }
-            >
-              <Text style={styles.adminBtnText}>Admin</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            style={styles.profileBtn}
-            onPress={() => navigation.navigate("Profile")}
-          >
-            <Text style={styles.profileIcon}>👤</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
+{/* oben: Admin / Teams / Profil rechts */}
+<View style={styles.infoRow}>
+  <View style={{ flex: 1 }} />
+  <View style={styles.infoButtons}>
+    {isAdmin && (
+      <TouchableOpacity
+        style={styles.adminBtn}
+        onPress={() =>
+          navigation.navigate("AdminSettings", {
+            userName,
+            isAdmin,
+          })
+        }
+      >
+        <Text style={styles.adminBtnText}>Admin</Text>
+      </TouchableOpacity>
+    )}
+
+    {/* ✅ Neuer Reiter: Teams/Liga */}
+    <TouchableOpacity
+      style={styles.teamsBtn}
+      onPress={() =>
+        navigation.navigate("Teams", {
+          userName,
+          isAdmin,
+        })
+      }
+    >
+      <Text style={styles.teamsIcon}>🎾</Text>
+    </TouchableOpacity>
+
+    <TouchableOpacity
+      style={styles.profileBtn}
+      onPress={() => navigation.navigate("Profile")}
+    >
+      <Text style={styles.profileIcon}>👤</Text>
+    </TouchableOpacity>
+  </View>
+</View>
+
 
       {/* Datum + Pfeile */}
       <View style={styles.subHeader}>
@@ -667,6 +686,18 @@ const styles = StyleSheet.create({
     borderColor: "#f28b25",
     marginLeft: 4,
   },
+  teamsBtn: {
+  paddingVertical: 5,
+  paddingHorizontal: 10,
+  borderRadius: 999,
+  borderWidth: 1,
+  borderColor: "#355a8a",
+  backgroundColor: "#022449",
+},
+teamsIcon: {
+  fontSize: 16,
+},
+
   profileIcon: {
     color: "#f28b25",
     fontSize: 16,
@@ -697,7 +728,7 @@ const styles = StyleSheet.create({
   },
   courtHeaderText: {
     color: "#ffffff",
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: "700",
   },
 
