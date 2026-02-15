@@ -1,124 +1,31 @@
 // api/teams.js
 // /api/teams?teamId=herren_w1
-// Strategy:
-// 1) Fetch stable PDF (ScheduleReportFOP)
-// 2) Extract nuLiga groupPage URL from PDF bytes via regex (no PDF parsing)
-// 3) Fetch nuLiga groupPage HTML
-// 4) Parse ranking + matches tables with cheerio
-
-const cheerio = require("cheerio");
+// Plan C: create session on btv.liga.nu, then fetch groupPage with cookies
 
 const TEAM_MAP = {
   herren_w1: {
-    pdf_url:
-      "https://btv.liga.nu/cgi-bin/WebObjects/nuLigaDokumentTENDE.woa/wa/nuDokument?dokument=ScheduleReportFOP&group=2115082",
+    groupId: "2115082",
   },
 };
 
-function normalizeSpace(s) {
-  return (s || "").replace(/\s+/g, " ").trim();
+function pickSetCookies(headers) {
+  // Node fetch may expose multiple set-cookie headers differently depending on runtime
+  const raw = headers.raw?.()["set-cookie"];
+  if (raw && Array.isArray(raw) && raw.length) return raw;
+
+  const single = headers.get("set-cookie");
+  if (single) return [single];
+
+  return [];
 }
 
-function parseHtmlTables($) {
-  const tables = [];
-  $("table").each((_, table) => {
-    const rows = [];
-    $(table)
-      .find("tr")
-      .each((__, tr) => {
-        const cells = [];
-        $(tr)
-          .find("th,td")
-          .each((___, td) => cells.push(normalizeSpace($(td).text())));
-        if (cells.some((c) => c.length)) rows.push(cells);
-      });
-    if (rows.length) tables.push(rows);
-  });
-  return tables;
+function cookiesToHeader(setCookies) {
+  // Keep only "name=value"
+  return setCookies
+    .map((c) => c.split(";")[0])
+    .filter(Boolean)
+    .join("; ");
 }
-
-function guessRankingTable(allTables) {
-  for (const t of allTables) {
-    const header = (t[0] || []).join(" | ").toLowerCase();
-    if (
-      header.includes("rang") &&
-      header.includes("mannschaft") &&
-      (header.includes("punkte") || header.includes("begegn"))
-    ) {
-      return t;
-    }
-  }
-  return null;
-}
-
-function guessMatchesTable(allTables) {
-  for (const t of allTables) {
-    const header = (t[0] || []).join(" | ").toLowerCase();
-    if (
-      header.includes("datum") ||
-      header.includes("uhr") ||
-      header.includes("begegn") ||
-      (header.includes("heim") && header.includes("gast"))
-    ) {
-      return t;
-    }
-  }
-  return null;
-}
-
-function tableToObjects(table) {
-  if (!table || table.length < 2) return [];
-  const headers = table[0].map((h) => normalizeSpace(h).toLowerCase());
-  return table.slice(1).map((row) => {
-    const obj = {};
-    headers.forEach((h, i) => {
-      obj[h || `col_${i}`] = row[i] ?? "";
-    });
-    return obj;
-  });
-}
-
-// Extract nuLiga groupPage URL from PDF binary text
-function extractGroupPageUrlFromPdfBytes(pdfBytes, groupId) {
-  const s = Buffer.from(pdfBytes).toString("latin1");
-
-  // 1) Try to find a full groupPage URL (rare)
-  let m = s.match(/https?:\/\/[a-z0-9.-]+\/cgi-bin\/WebObjects\/nuLigaTENDE\.woa\/wa\/groupPage\?[^"'<> \r\n]+/i);
-  if (m?.[0]) return m[0];
-
-  // 2) Try to find 'championship' parameter in different encodings
-  // Common encodings: "championship=XYZ", "championship%3DXYZ", "championship%253DXYZ"
-  const patterns = [
-    /championship=([A-Za-z0-9._%+\-]+(?:%2F[A-Za-z0-9._%+\-]+)*)/i,
-    /championship%3D([A-Za-z0-9._%+\-]+(?:%2F[A-Za-z0-9._%+\-]+)*)/i,
-    /championship%253D([A-Za-z0-9._%+\-]+(?:%252F[A-Za-z0-9._%+\-]+)*)/i,
-  ];
-
-  let champ = null;
-  for (const re of patterns) {
-    const mm = s.match(re);
-    if (mm?.[1]) {
-      champ = mm[1];
-      break;
-    }
-  }
-
-  // If we found something, normalize double-encoding a bit
-  if (champ) {
-    // decode once if it looks encoded (safe try)
-    try {
-      champ = decodeURIComponent(champ);
-    } catch {}
-    // re-encode to be safe in URL
-    champ = encodeURIComponent(champ);
-    return `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?championship=${champ}&group=${encodeURIComponent(
-      groupId
-    )}`;
-  }
-
-  return null;
-}
-
 
 module.exports = async (req, res) => {
   const t0 = Date.now();
@@ -131,87 +38,84 @@ module.exports = async (req, res) => {
     const cfg = TEAM_MAP[teamId];
     if (!cfg) return res.status(404).json({ error: "unknown_teamId", teamId });
 
-    // 1) fetch PDF (stable)
-    log("fetch pdf");
-    const pdfResp = await fetch(cfg.pdf_url, { headers: { "user-agent": "Mozilla/5.0" } });
-    if (!pdfResp.ok) {
-      return res.status(502).json({ error: "pdf_fetch_failed", status: pdfResp.status, pdf_url: cfg.pdf_url });
-    }
-    const ab = await pdfResp.arrayBuffer();
-    const pdfBytes = new Uint8Array(ab);
-    log(`pdf bytes=${pdfBytes.byteLength}`);
-
-    // 2) extract nuLiga HTML URL from PDF bytes
-    log("extract groupPage url from pdf bytes");
-    const groupPageUrl = extractGroupPageUrlFromPdfBytes(pdfBytes, "2115082");
-    if (!groupPageUrl) {
-return res.status(200).json({
-  ok: false,
-  status: "PENDING",
-  reason: "groupPage_url_not_found_in_pdf",
-  pdf_url: cfg.pdf_url,
-  debug: {
-    has_championship_word: Buffer.from(pdfBytes).toString("latin1").includes("championship"),
-    has_group_word: Buffer.from(pdfBytes).toString("latin1").includes("group"),
-  },
-});
-    }
-
-    // 3) fetch nuLiga HTML
-    log(`fetch nuLiga html: ${groupPageUrl}`);
-    const htmlResp = await fetch(groupPageUrl, {
-      headers: {
-        "user-agent": "Mozilla/5.0",
-        "accept-language": "de-DE,de;q=0.9,en;q=0.8",
-        // sometimes helps:
-        referer: "https://btv.liga.nu/",
-      },
+    // 1) Warmup request to create session + get cookies
+    const homeUrl = "https://btv.liga.nu/";
+    log("warmup session");
+    const homeResp = await fetch(homeUrl, {
+      headers: { "user-agent": "Mozilla/5.0" },
       redirect: "follow",
     });
-    const html = await htmlResp.text();
 
-    if (!htmlResp.ok || html.length < 500) {
-      return res.status(502).json({
-        error: "nuliga_html_fetch_failed",
-        status: htmlResp.status,
-        groupPageUrl,
-        preview: html.slice(0, 400),
+    const setCookies = pickSetCookies(homeResp.headers);
+    const cookieHeader = cookiesToHeader(setCookies);
+
+    log(`cookies found=${setCookies.length}`);
+
+    // 2) Try different groupPage URL variants (some installs want group=, some groupid=)
+    const candidates = [
+      `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?group=${encodeURIComponent(
+        cfg.groupId
+      )}`,
+      `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?groupid=${encodeURIComponent(
+        cfg.groupId
+      )}`,
+      // sometimes works as "competitionPage"
+      `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/competitionPage?group=${encodeURIComponent(
+        cfg.groupId
+      )}`,
+    ];
+
+    // 3) Fetch candidates with cookies + referer
+    for (const url of candidates) {
+      log(`try url: ${url}`);
+      const r = await fetch(url, {
+        headers: {
+          "user-agent": "Mozilla/5.0",
+          referer: homeUrl,
+          cookie: cookieHeader,
+          "accept-language": "de-DE,de;q=0.9,en;q=0.8",
+        },
+        redirect: "follow",
       });
+
+      const html = await r.text();
+      const preview = html.slice(0, 600);
+
+      // Heuristic: forbidden call pages are tiny and contain "Forbidden Call"
+      const isForbidden =
+        preview.toLowerCase().includes("forbidden") ||
+        preview.toLowerCase().includes("forbidden call");
+
+      // Heuristic: nuLiga pages usually contain "nuLiga" / tables / forms
+      const looksLikeNuLiga =
+        html.length > 2000 &&
+        (html.includes("nuLiga") ||
+          html.includes("WebObjects") ||
+          html.includes("table") ||
+          html.includes("wa/"));
+
+      if (!isForbidden && looksLikeNuLiga) {
+        return res.status(200).json({
+          ok: true,
+          teamId,
+          picked_url: url,
+          status_code: r.status,
+          ms: Date.now() - t0,
+          cookies_used: setCookies.length,
+          html_preview: preview,
+        });
+      }
+
+      // keep debug info if none works
     }
 
-    // 4) parse tables
-    log("parse html tables");
-    const $ = cheerio.load(html);
-    const title =
-      normalizeSpace($("h1").first().text()) || normalizeSpace($("title").text());
-
-    const allTables = parseHtmlTables($);
-    const rankingTable = guessRankingTable(allTables);
-    const matchesTable = guessMatchesTable(allTables);
-
-    const table = rankingTable ? tableToObjects(rankingTable) : [];
-    const matches = matchesTable ? tableToObjects(matchesTable) : [];
-
-    const status = table.length || matches.length ? "ACTIVE" : "PENDING";
-
     return res.status(200).json({
-      ok: true,
-      teamId,
-      status,
-      title,
-      source: {
-        pdf_url: cfg.pdf_url,
-        groupPageUrl,
-      },
+      ok: false,
+      reason: "all_candidates_forbidden_or_not_nuliga",
       ms: Date.now() - t0,
-      parsed: {
-        tables_found: allTables.length,
-        used_ranking_table: !!rankingTable,
-        used_matches_table: !!matchesTable,
-      },
-      table,
-      matches,
-      next_matches: matches.slice(0, 3),
+      cookies_used: setCookies.length,
+      candidates,
+      hint: "Next step: inspect preview/status_code to adjust URL or headers",
     });
   } catch (err) {
     console.error("[teams] error:", err);
