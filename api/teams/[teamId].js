@@ -1,4 +1,8 @@
 module.exports = async (req, res) => {
+  return res.status(200).json({ ok: true, stage: "immediate" });
+};
+
+module.exports = async (req, res) => {
   try {
     require.resolve("@napi-rs/canvas");
   } catch (e) {
