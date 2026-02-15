@@ -1,3 +1,17 @@
+module.exports = async (req, res) => {
+  try {
+    require.resolve("@napi-rs/canvas");
+  } catch (e) {
+    console.error("resolve canvas failed:", e);
+    return res.status(500).json({
+      error: "canvas_not_found",
+      detail: e.message,
+    });
+  }
+
+  // ... ab hier erst dein bisheriger Code ...
+};
+
 // api/teams/[teamId].js
 import pdf from "pdf-parse";
 import { createClient } from "@supabase/supabase-js";
