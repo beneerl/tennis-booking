@@ -1,96 +1,111 @@
 // api/teams.js
 // /api/teams?teamId=herren_w1
-// Fetch PDF -> extract text using pdf-lib (no canvas, no DOMMatrix)
+// Strategy:
+// 1) Fetch BTV page (groupid=...)
+// 2) Extract nuLiga groupPage URL from HTML (regex)
+// 3) Fetch nuLiga groupPage HTML
+// 4) Parse tables (ranking + matches) with cheerio
+//
+// NOTE: First get it working without Supabase cache. Add cache after we see good JSON.
 
-const { PDFDocument } = require("pdf-lib");
+const cheerio = require("cheerio");
 
 const TEAM_MAP = {
   herren_w1: {
-    source_url:
-      "https://btv.liga.nu/cgi-bin/WebObjects/nuLigaDokumentTENDE.woa/wa/nuDokument?dokument=ScheduleReportFOP&group=2115082",
+    // your stable entrypoint
+    btv_url: "https://www.btv.de/de/spielbetrieb/tabelle-spielplan.html?groupid=2115082",
   },
 };
 
-async function extractTextPdfLib(arrayBuffer) {
-  const pdfBytes = new Uint8Array(arrayBuffer);
-  const pdfDoc = await PDFDocument.load(pdfBytes);
+function pickFirstNonEmpty(arr) {
+  return arr.find((x) => typeof x === "string" && x.trim().length > 0) || null;
+}
 
-  // pdf-lib hat keine "one-liner" Text-API, aber wir können den Content stream lesen.
-  // Das ist ein pragmatischer Ansatz: alle Contents (Operators) sammeln und Strings extrahieren.
-  // Für viele "Text PDFs" funktioniert das ausreichend, um Match-/Tabellenzeilen zu parsen.
+function normalizeSpace(s) {
+  return (s || "").replace(/\s+/g, " ").trim();
+}
 
-  let out = "";
+// Try to find a nuLiga groupPage URL inside the BTV HTML
+function extractNuLigaGroupPageUrl(btvHtml) {
+  // typical patterns we saw on the web:
+  // .../cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?championship=...&group=...
+  const re = /https?:\/\/[a-z0-9.-]+\/cgi-bin\/WebObjects\/nuLigaTENDE\.woa\/wa\/groupPage\?[^"'<> ]+/gi;
+  const matches = btvHtml.match(re);
+  if (matches && matches.length) return matches[0];
 
-  const pages = pdfDoc.getPages();
-  for (let i = 0; i < pages.length; i++) {
-    const page = pages[i];
+  // sometimes relative (rare)
+  const reRel = /\/cgi-bin\/WebObjects\/nuLigaTENDE\.woa\/wa\/groupPage\?[^"'<> ]+/i;
+  const rel = btvHtml.match(reRel);
+  if (rel && rel[0]) return `https://btv.liga.nu${rel[0]}`;
 
-    const contentStream = await page.node.Contents();
-    if (!contentStream) continue;
+  return null;
+}
 
-    // Contents kann ein Stream oder Array sein
-    const streams = Array.isArray(contentStream) ? contentStream : [contentStream];
+function parseHtmlTables($) {
+  // Returns all HTML tables as arrays of row arrays
+  const tables = [];
+  $("table").each((_, table) => {
+    const rows = [];
+    $(table)
+      .find("tr")
+      .each((__, tr) => {
+        const cells = [];
+        $(tr)
+          .find("th,td")
+          .each((___, td) => {
+            cells.push(normalizeSpace($(td).text()));
+          });
+        if (cells.some((c) => c.length)) rows.push(cells);
+      });
+    if (rows.length) tables.push(rows);
+  });
+  return tables;
+}
 
-    for (const s of streams) {
-      const raw = s.contents ? s.contents : s; // defensive
-      // pdf-lib intern: wir versuchen an den decoded stream zu kommen
-      let decoded;
-      try {
-        decoded = raw.decode ? raw.decode() : raw;
-      } catch {
-        decoded = raw;
-      }
-
-      // decoded kann Uint8Array sein
-      const buf =
-        decoded instanceof Uint8Array
-          ? decoded
-          : decoded?.contents instanceof Uint8Array
-          ? decoded.contents
-          : null;
-
-      if (!buf) continue;
-
-      const str = Buffer.from(buf).toString("latin1"); // pdf operators sind oft latin1
-      out += str + "\n";
+function guessRankingTable(allTables) {
+  // Heuristic: ranking table often contains headers like "Rang" + "Mannschaft" + "Begegnungen"
+  for (const t of allTables) {
+    const headerRow = t[0] || [];
+    const header = headerRow.join(" | ").toLowerCase();
+    if (
+      header.includes("rang") &&
+      header.includes("mannschaft") &&
+      (header.includes("begegnungen") || header.includes("punkte"))
+    ) {
+      return t;
     }
-
-    out += "\n---PAGE---\n";
   }
+  return null;
+}
 
-  // Jetzt sind das noch PDF-Operatoren. Wir extrahieren daraus die Strings in Klammern: (text)
-  // und Hex-Strings <...> die häufig Text enthalten.
-  const texts = [];
-
-  // ( ... ) Strings (mit escaped Klammern)
-  const reParen = /\((?:\\.|[^\\)])*\)/g;
-  let m;
-  while ((m = reParen.exec(out)) !== null) {
-    const t = m[0].slice(1, -1).replace(/\\([()\\nrtbf])/g, "$1");
-    if (t.trim()) texts.push(t);
+function guessMatchesTable(allTables) {
+  // Heuristic: matches table often contains "Datum" or "Heim" "Gast" or "Begegnung"
+  for (const t of allTables) {
+    const headerRow = t[0] || [];
+    const header = headerRow.join(" | ").toLowerCase();
+    if (
+      header.includes("datum") ||
+      header.includes("uhr") ||
+      header.includes("begegn") ||
+      (header.includes("heim") && header.includes("gast"))
+    ) {
+      return t;
+    }
   }
+  return null;
+}
 
-  // <...> Hex strings (häufig UTF-16BE oder latin1)
-  const reHex = /<([0-9A-Fa-f]+)>/g;
-  while ((m = reHex.exec(out)) !== null) {
-    const hex = m[1];
-    if (hex.length < 4) continue;
-    try {
-      const bytes = Buffer.from(hex, "hex");
-      // Heuristik: UTF-16BE wenn viele 00 Bytes
-      const zeroCount = [...bytes].filter((b) => b === 0).length;
-      let t = "";
-      if (zeroCount > bytes.length * 0.2) {
-        t = bytes.toString("utf16le"); // oft klappt's, sonst fallback
-      } else {
-        t = bytes.toString("latin1");
-      }
-      t = t.replace(/\u0000/g, "").trim();
-      if (t) texts.push(t);
-    } catch {}
-  }
-
-  return texts.join("\n");
+function tableToObjects(table) {
+  // Convert rows to objects using header row
+  if (!table || table.length < 2) return [];
+  const headers = table[0].map((h) => normalizeSpace(h).toLowerCase());
+  return table.slice(1).map((row) => {
+    const obj = {};
+    headers.forEach((h, i) => {
+      obj[h || `col_${i}`] = row[i] ?? "";
+    });
+    return obj;
+  });
 }
 
 module.exports = async (req, res) => {
@@ -104,36 +119,81 @@ module.exports = async (req, res) => {
     const cfg = TEAM_MAP[teamId];
     if (!cfg) return res.status(404).json({ error: "unknown_teamId", teamId });
 
-    log("fetch pdf");
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-    const r = await fetch(cfg.source_url, { signal: controller.signal });
-    clearTimeout(timeout);
+    // 1) Fetch BTV html
+    log("fetch btv page");
+    const btvResp = await fetch(cfg.btv_url, {
+      headers: { "user-agent": "Mozilla/5.0" },
+    });
+    const btvHtml = await btvResp.text();
 
-    if (!r.ok) {
-      return res.status(502).json({ error: "pdf_fetch_failed", status: r.status });
+    // 2) Extract nuLiga groupPage url
+    log("extract nuLiga url");
+    const nuLigaUrl = extractNuLigaGroupPageUrl(btvHtml);
+
+    if (!nuLigaUrl) {
+      // If BTV page doesn't contain it (JS only), return debug preview so we can refine regex.
+      return res.status(200).json({
+        ok: false,
+        status: "PENDING",
+        reason: "nuLiga_url_not_found_in_btv_html",
+        hint: "BTV page likely loads data via JS. We need the embedded nuLiga URL or an API call URL.",
+        btv_url: cfg.btv_url,
+        btv_preview: btvHtml.slice(0, 1200),
+      });
     }
 
-    const ab = await r.arrayBuffer();
-    log(`downloaded bytes=${ab.byteLength}`);
+    // 3) Fetch nuLiga group page html
+    log("fetch nuLiga groupPage");
+    const nuResp = await fetch(nuLigaUrl, {
+      headers: { "user-agent": "Mozilla/5.0" },
+    });
+    const nuHtml = await nuResp.text();
 
-    log("extract text (pdf-lib)");
-    const text = await extractTextPdfLib(ab);
-    log(`textLen=${text.length}`);
+    // 4) Parse nuLiga page
+    log("parse nuLiga html");
+    const $ = cheerio.load(nuHtml);
+    const title = normalizeSpace($("h1").first().text()) || normalizeSpace($("title").text());
+
+    const allTables = parseHtmlTables($);
+    const rankingTable = guessRankingTable(allTables);
+    const matchesTable = guessMatchesTable(allTables);
+
+    const table = rankingTable ? tableToObjects(rankingTable) : [];
+    const matches = matchesTable ? tableToObjects(matchesTable) : [];
+
+    // Status logic (simple):
+    // If we have neither table nor matches, treat as PENDING
+    const status = table.length || matches.length ? "ACTIVE" : "PENDING";
+
+    // next_matches: take first 3 rows that look like future fixtures (best-effort)
+    const next_matches = matches.slice(0, 3);
 
     return res.status(200).json({
       ok: true,
       teamId,
-      source_url: cfg.source_url,
+      status,
+      title,
+      source: {
+        btv_url: cfg.btv_url,
+        nuLiga_groupPage_url: nuLigaUrl,
+      },
+      last_updated: new Date().toISOString(),
       ms: Date.now() - t0,
-      text_preview: text.slice(0, 1200),
+      parsed: {
+        tables_found: allTables.length,
+        used_ranking_table: !!rankingTable,
+        used_matches_table: !!matchesTable,
+      },
+      table,
+      matches,
+      next_matches,
     });
   } catch (err) {
     console.error("[teams] error:", err);
     return res.status(500).json({
       error: "internal_error",
       message: err?.message || String(err),
-      stack: (err?.stack || "").split("\n").slice(0, 6),
+      stack: (err?.stack || "").split("\n").slice(0, 8),
     });
   }
 };
