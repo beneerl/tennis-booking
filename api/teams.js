@@ -76,8 +76,24 @@ module.exports = async (req, res) => {
           cookie: cookieHeader,
           "accept-language": "de-DE,de;q=0.9,en;q=0.8",
         },
-        redirect: "follow",
+        redirect: "manual",
       });
+       const location =
+    (typeof r.headers?.get === "function" && r.headers.get("location")) ||
+    null;
+
+  const isRedirect = r.status >= 300 && r.status < 400;
+
+  if (isRedirect) {
+    return res.status(200).json({
+      ok: false,
+      reason: "redirected",
+      picked_url: url,
+      status_code: r.status,
+      location,
+      cookies_used: setCookies.length,
+    });
+  }
 
       const html = await r.text();
       const preview = html.slice(0, 600);
