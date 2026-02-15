@@ -1,117 +1,70 @@
 // api/teams.js
-// Endpoint: /api/teams?teamId=herren_w1
-//
-// Goal (this version): Find an HTML (NOT PDF) representation of the nuLiga report,
-// by trying common "format/view/output" parameters on the stable nuDokument URL.
-// If we find HTML, we return a preview so we can implement cheerio parsing next.
-// If we only get PDF, we report that clearly.
-//
-// NOTE: This version intentionally does NOT parse PDF.
+// /api/teams?teamId=herren_w1
+// Reads cached JSON from Supabase table: team_cache
 
-const TEAM_MAP = {
-  herren_w1: {
-    groupId: "2115082",
-    // stable PDF/report endpoint you already have
-    reportBase:
-      "https://btv.liga.nu/cgi-bin/WebObjects/nuLigaDokumentTENDE.woa/wa/nuDokument?dokument=ScheduleReportFOP&group=2115082",
-  },
-};
+const { createClient } = require("@supabase/supabase-js");
+
+const TTL_MINUTES = 60;
+
+function minutesSince(iso) {
+  if (!iso) return Infinity;
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return Infinity;
+  return (Date.now() - t) / 60000;
+}
 
 module.exports = async (req, res) => {
-  const t0 = Date.now();
-  const log = (m) => console.log(`[teams] +${Date.now() - t0}ms ${m}`);
-
   try {
     const teamId = req.query.teamId;
     if (!teamId) return res.status(400).json({ error: "missing_teamId" });
 
-    const cfg = TEAM_MAP[teamId];
-    if (!cfg) return res.status(404).json({ error: "unknown_teamId", teamId });
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-    const reportBase = cfg.reportBase;
-
-    // Try common variants that (depending on nuLiga config) may return HTML instead of PDF.
-    const candidates = [
-      reportBase,
-      `${reportBase}&format=html`,
-      `${reportBase}&view=html`,
-      `${reportBase}&output=html`,
-      `${reportBase}&export=html`,
-      `${reportBase}&filetype=html`,
-      `${reportBase}&contentType=text/html`,
-      `${reportBase}&type=html`,
-      `${reportBase}&as=html`,
-      `${reportBase}&mime=text/html`,
-    ];
-
-    const results = [];
-
-    for (const url of candidates) {
-      log(`try: ${url}`);
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
-
-      let r;
-      try {
-        r = await fetch(url, {
-          headers: {
-            "user-agent": "Mozilla/5.0",
-            accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "accept-language": "de-DE,de;q=0.9,en;q=0.8",
-          },
-          redirect: "follow",
-          signal: controller.signal,
-        });
-      } finally {
-        clearTimeout(timeout);
-      }
-
-      const contentType =
-        (typeof r.headers?.get === "function" && r.headers.get("content-type")) || "";
-
-      // Read a small preview safely (works for HTML; for PDF we won't read the whole thing)
-      let preview = "";
-      if (contentType.includes("text/html")) {
-        const html = await r.text();
-        preview = html.slice(0, 900);
-
-        // Found HTML -> return immediately with preview
-        return res.status(200).json({
-          ok: true,
-          teamId,
-          found: "html_report",
-          picked_url: url,
-          status_code: r.status,
-          contentType,
-          ms: Date.now() - t0,
-          html_preview: preview,
-          next_step:
-            "If preview contains schedule/table HTML, we will parse it with cheerio into matches/table JSON + add Supabase caching.",
-        });
-      }
-
-      // For PDFs (or other types), just record status/type and continue.
-      results.push({
-        url,
-        status_code: r.status,
-        contentType,
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return res.status(500).json({
+        error: "missing_env",
+        message:
+          "SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set on Vercel (Project Settings → Environment Variables).",
       });
     }
 
-    // If we reach here, none of the candidates returned HTML.
+    const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+    const { data, error } = await supabase
+      .from("team_cache")
+      .select("team_id, payload_json, status, source_url, updated_at")
+      .eq("team_id", teamId)
+      .maybeSingle();
+
+    if (error) {
+      return res.status(500).json({ error: "supabase_error", message: error.message });
+    }
+
+    if (!data) {
+      return res.status(200).json({
+        ok: false,
+        teamId,
+        status: "PENDING",
+        reason: "no_cache_entry",
+        hint:
+          "Run GitHub Action 'Refresh team cache' to populate team_cache for this teamId.",
+      });
+    }
+
+    const ageMin = minutesSince(data.updated_at);
+    const isFresh = ageMin <= TTL_MINUTES;
+
     return res.status(200).json({
-      ok: false,
-      teamId,
-      reason: "no_html_variant_found",
-      ms: Date.now() - t0,
-      reportBase,
-      tried: results,
-      note:
-        "All variants returned non-HTML (likely PDF only). If so, we must either (1) parse PDF outside Vercel with a dedicated worker, or (2) locate an alternate nuLiga export endpoint (CSV/HTML) for this league.",
+      ok: true,
+      teamId: data.team_id,
+      status: data.status || "UNKNOWN",
+      source_url: data.source_url,
+      updated_at: data.updated_at,
+      cache: { age_minutes: Math.round(ageMin), fresh: isFresh, ttl_minutes: TTL_MINUTES },
+      payload: data.payload_json || {},
     });
   } catch (err) {
-    console.error("[teams] error:", err);
     return res.status(500).json({
       error: "internal_error",
       message: err?.message || String(err),
