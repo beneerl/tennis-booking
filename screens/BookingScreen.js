@@ -312,21 +312,24 @@ useEffect(() => {
         return;
       }
 
-           (async () => {
-        const ok = await confirmDelete(
-          "Buchung löschen?",
-          `Möchtest du diese Buchung wirklich löschen?\n\nPlatz: ${courtName}\nDatum: ${dateLabel}\nZeit: ${time}\nSpieler: ${existing.userName}${
-            existing.coPlayerName ? " / " + existing.coPlayerName : ""
-          }`
-        );
-
-        if (!ok) return;
-
-        setBookings((prev) => prev.filter((b) => b.id !== id));
-        await deleteBookingFromSupabase(courtIndex, time);
-      })();
+      Alert.alert(
+        "Buchung löschen?",
+        `Möchtest du diese Buchung wirklich löschen?\n\nPlatz: ${courtName}\nDatum: ${dateLabel}\nZeit: ${time}\nSpieler: ${existing.userName}${
+          existing.coPlayerName ? " / " + existing.coPlayerName : ""
+        }`,
+        [
+          { text: "Abbrechen", style: "cancel" },
+          {
+            text: "Löschen",
+            style: "destructive",
+            onPress: async () => {
+              setBookings((prev) => prev.filter((b) => b.id !== id));
+              await deleteBookingFromSupabase(courtIndex, time);
+            },
+          },
+        ]
+      );
       return;
-
     }
 
     // 2) Slot ist gesperrt
@@ -403,13 +406,14 @@ useEffect(() => {
     const hoursAfter = hoursAlready + hoursNew;
 
     if (hoursAfter > maxHoursPerDay && !isAdmin) {
-      Alert.alert(
+      showMessage(
         "Limit erreicht",
         `Mit dieser Buchung würdest du das Tageslimit von ${maxHoursPerDay} Stunden überschreiten.`
       );
       setBookingModalVisible(false);
       return;
     }
+
 
     const newBookings = timesToBook.map((t) => ({
       id: `${courtIndex}-${t}-${currentDateKey}`,
