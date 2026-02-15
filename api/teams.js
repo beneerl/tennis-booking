@@ -2,7 +2,8 @@
 // Serverless endpoint: /api/teams?teamId=herren_w1
 // Purpose (debug step): fetch PDF -> extract text using pdfjs-dist (no canvas) -> return preview JSON
 
-const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
+const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.mjs");
+
 
 const TEAM_MAP = {
   herren_w1: {
