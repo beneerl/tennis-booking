@@ -131,16 +131,89 @@ module.exports = async (req, res) => {
     const nuLigaUrl = extractNuLigaGroupPageUrl(btvHtml);
 
     if (!nuLigaUrl) {
-      // If BTV page doesn't contain it (JS only), return debug preview so we can refine regex.
+      log("nuLiga url not found in HTML -> scan scripts");
+
+      // collect script src
+      const $btv = cheerio.load(btvHtml);
+      const scriptSrcs = [];
+      $btv("script[src]").each((_, el) => {
+        const src = $btv(el).attr("src");
+        if (src) scriptSrcs.push(src);
+      });
+
+      // make absolute URLs
+      const abs = scriptSrcs
+        .map((s) => (s.startsWith("http") ? s : new URL(s, cfg.btv_url).toString()))
+        // ignore obvious third-party analytics/cookie
+        .filter(
+          (u) =>
+            !u.includes("cookiebot") &&
+            !u.includes("matomo") &&
+            !u.includes("google") &&
+            !u.includes("gstatic")
+        )
+        .slice(0, 6); // keep it small
+
+      const findings = [];
+
+      for (const jsUrl of abs) {
+        try {
+          log(`fetch js: ${jsUrl}`);
+          const jsResp = await fetch(jsUrl, { headers: { "user-agent": "Mozilla/5.0" } });
+          const jsText = await jsResp.text();
+
+          // look for promising patterns
+          const patterns = [
+            "nuLigaTENDE.woa/wa/groupPage",
+            "btv.liga.nu",
+            "nuLigaDokumentTENDE",
+            "groupid",
+            "group=",
+            "championship=",
+            "wa/groupPage",
+            "wa/nuDokument",
+            "tabelle",
+            "spielplan",
+          ];
+
+          const hits = patterns.filter((p) => jsText.includes(p));
+          if (hits.length) {
+            findings.push({
+              jsUrl,
+              status: jsResp.status,
+              hits,
+              snippet: jsText.slice(0, 800),
+            });
+
+            // also try to extract a full nuLiga URL directly
+            const direct = jsText.match(
+              /https?:\/\/[a-z0-9.-]+\/cgi-bin\/WebObjects\/nuLigaTENDE\.woa\/wa\/groupPage\?[^"'<> ]+/i
+            );
+            if (direct && direct[0]) {
+              return res.status(200).json({
+                ok: true,
+                status: "ACTIVE",
+                found: "nuLiga_url_in_js",
+                nuLiga_groupPage_url: direct[0],
+                jsUrl,
+              });
+            }
+          }
+        } catch (e) {
+          findings.push({ jsUrl, error: e.message || String(e) });
+        }
+      }
+
       return res.status(200).json({
         ok: false,
         status: "PENDING",
-        reason: "nuLiga_url_not_found_in_btv_html",
-        hint: "BTV page likely loads data via JS. We need the embedded nuLiga URL or an API call URL.",
+        reason: "nuLiga_url_not_found_in_btv_html_or_first_js",
         btv_url: cfg.btv_url,
-        btv_preview: btvHtml.slice(0, 1200),
+        scripts_checked: abs,
+        findings,
       });
     }
+
 
     // 3) Fetch nuLiga group page html
     log("fetch nuLiga groupPage");
