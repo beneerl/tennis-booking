@@ -38,17 +38,11 @@ const generateTimeSlots = () => {
 const TIME_SLOTS = generateTimeSlots();
 const COURTS = ["P1", "P2", "P3"];
 const getDateKey = (d) => d.toISOString().split("T")[0];
+
 function confirmDelete(title, message) {
   if (Platform.OS === "web") {
     return Promise.resolve(window.confirm(message));
   }
-function showMessage(title, message) {
-  if (Platform.OS === "web") {
-    window.alert(`${title}\n\n${message}`);
-  } else {
-    Alert.alert(title, message);
-  }
-}
 
   return new Promise((resolve) => {
     Alert.alert(title, message, [
@@ -57,6 +51,15 @@ function showMessage(title, message) {
     ]);
   });
 }
+
+function showMessage(title, message) {
+  if (Platform.OS === "web") {
+    window.alert(`${title}\n\n${message}`);
+  } else {
+    Alert.alert(title, message);
+  }
+}
+
 
 export default function BookingScreen({ route, navigation }) {
   const params = route?.params || {};
@@ -389,7 +392,7 @@ useEffect(() => {
       timesToBook = [startTime];
     } else {
       if (!selectedEndTime) {
-        Alert.alert("Hinweis", "Bitte eine Endzeit auswählen.");
+        showMessage("Hinweis", "Bitte eine Endzeit auswählen.");
         return;
       }
       const startIndex = TIME_SLOTS.indexOf(startTime);
