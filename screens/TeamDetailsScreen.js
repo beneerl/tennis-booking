@@ -189,6 +189,8 @@ const toIso = (datum, uhrzeit) => {
 const mapMatch = (m) => {
   const dateIso = toIso(m?.datum, m?.uhrzeit);
   const score = m?.erg ? ` · ${m.erg}` : "";
+  const club = "TeG Alzstadt";
+  const isHome = (m?.heim || "").toLowerCase().includes(club.toLowerCase());
   return {
     id: `${m?.datum}-${m?.uhrzeit}-${m?.heim}-${m?.gast}-${m?.erg}`,
     date: dateIso,
