@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -79,6 +79,7 @@ export default function BookingScreen({ route, navigation }) {
   const [endOptions, setEndOptions] = useState([]);
   const [selectedEndTime, setSelectedEndTime] = useState(null);
   const [coPlayerNameInput, setCoPlayerNameInput] = useState("");
+const pendingDeleteRef = useRef(new Set()); // merkt sich Slots, die gerade gelöscht werden
 
   const formatDate = (d) =>
     d.toLocaleDateString("de-DE", {
@@ -138,7 +139,9 @@ export default function BookingScreen({ route, navigation }) {
         coPlayerName: row.player2 || "",
       }));
 
-      setBookings(mapped);
+      const filtered = mapped.filter((b) => !pendingDeleteRef.current.has(b.id));
+setBookings(filtered);
+
     } catch (e) {
       console.log("Supabase load exception:", e);
       Alert.alert("DB-Fehler (Exception)", String(e));
@@ -237,24 +240,40 @@ useEffect(() => {
     return bookings.find((b) => b.id === id);
   };
 
-  const deleteBookingFromSupabase = async (courtIndex, time) => {
-    try {
-      const { error } = await supabase
-        .from("bookings123")
-        .delete()
-        .eq("court_index", courtIndex)
-        .eq("time", time)
-        .eq("date_key", currentDateKey);
+const deleteBookingFromSupabase = async (courtIndex, time) => {
+  const id = `${courtIndex}-${time}-${currentDateKey}`;
 
-      if (error) {
-        console.log("Supabase delete error:", error.message);
-        Alert.alert("DB-Fehler (Löschen)", error.message);
-      }
-    } catch (e) {
-      console.log("Supabase delete exception:", e);
-      Alert.alert("DB-Fehler (Exception)", String(e));
+  // ✅ Pending merken, damit Auto-Refresh sie nicht zurückholt
+  pendingDeleteRef.current.add(id);
+
+  try {
+    const { error } = await supabase
+      .from("bookings123")
+      .delete()
+      .eq("court_index", courtIndex)
+      .eq("time", time)
+      .eq("date_key", currentDateKey);
+
+    if (error) {
+      // ❌ rollback: pending entfernen + reload
+      pendingDeleteRef.current.delete(id);
+      console.log("Supabase delete error:", error.message);
+      showMessage("DB-Fehler (Löschen)", error.message);
+      await loadBookingsForDate(currentDateKey);
+      return;
     }
-  };
+
+    // ✅ Erfolgreich: pending entfernen und einmal hart nachladen (optional aber sauber)
+    pendingDeleteRef.current.delete(id);
+    // await loadBookingsForDate(currentDateKey);
+  } catch (e) {
+    pendingDeleteRef.current.delete(id);
+    console.log("Supabase delete exception:", e);
+    showMessage("DB-Fehler (Exception)", String(e));
+    await loadBookingsForDate(currentDateKey);
+  }
+};
+
 
 const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName) => {
   try {
