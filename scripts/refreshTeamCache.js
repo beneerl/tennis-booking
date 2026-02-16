@@ -35,37 +35,63 @@ function pdfToText(pdfPath) {
   return fs.readFileSync(txtPath, "utf8");
 }
 
-// Erstmal nur als Beweis, dass die Pipeline funktioniert.
-// Danach ersetzen wir das durch extractMatches/extractTable.
 function parseRanking(text) {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length);
 
-  // Find header line that starts with "Rang Mannschaft"
-  const headerIdx = lines.findIndex((l) => l.toLowerCase().startsWith("rang mannschaft"));
+  const headerIdx = lines.findIndex((l) =>
+    l.toLowerCase().startsWith("rang mannschaft")
+  );
   if (headerIdx === -1) return [];
 
   const rows = [];
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const line = lines[i];
+    const lower = line.toLowerCase();
 
-    // Stop when schedule section begins (Termin/Heimmannschaft...) or "Spielleiter"
-    if (line.toLowerCase().includes("termin") && line.toLowerCase().includes("heimmannschaft")) break;
-    if (line.toLowerCase().startsWith("spielleiter")) break;
+    // Stop when schedule header begins or footer
+    if (
+      lower.includes("termin") &&
+      lower.includes("heimmannschaft") &&
+      lower.includes("gastmannschaft")
+    )
+      break;
+    if (lower.startsWith("spielleiter")) break;
+    if (lower.startsWith("btv-hotline")) break;
 
-    // Example:
-    // 1 TC Waging am See (02378) 4 8:0 21:3 44:7 277:104
-    const m = line.match(
-      /^(\d+)\s+(.+?)\s+(\d+)\s+(\d+:\d+)\s+(\d+:\d+)\s+(\d+:\d+)\s+(\d+:\d+)\s*$/
-    );
-    if (m) {
+    // Robust parse: split tokens; last 5 tokens are numeric/scores
+    const parts = line.split(/\s+/);
+    if (parts.length < 8) continue;
+
+    if (!/^\d+$/.test(parts[0])) continue;
+
+    const rang = Number(parts[0]);
+    const spiele = parts[parts.length - 1];
+    const saetze = parts[parts.length - 2];
+    const matches = parts[parts.length - 3];
+    const punkte = parts[parts.length - 4];
+    const begegnungen = parts[parts.length - 5];
+
+    const isScore = (s) => /^\d+:\d+$/.test(s);
+
+    if (
+      /^\d+$/.test(begegnungen) &&
+      isScore(punkte) &&
+      isScore(matches) &&
+      isScore(saetze) &&
+      isScore(spiele)
+    ) {
+      const mannschaft = parts.slice(1, parts.length - 5).join(" ");
       rows.push({
-        rang: Number(m[1]),
-        mannschaft: m[2],
-        begegnungen: Number(m[3]),
-        punkte: m[4],
-        matches: m[5],
-        saetze: m[6],
-        spiele: m[7],
+        rang,
+        mannschaft,
+        begegnungen: Number(begegnungen),
+        punkte,
+        matches,
+        saetze,
+        spiele,
       });
     }
   }
@@ -73,27 +99,37 @@ function parseRanking(text) {
 }
 
 function parseMatches(text) {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length);
 
-  // Find header line for schedule
-  const headerIdx = lines.findIndex(
-    (l) =>
-      l.toLowerCase().includes("termin") &&
-      l.toLowerCase().includes("heimmannschaft") &&
-      l.toLowerCase().includes("gastmannschaft")
-  );
+  const headerIdx = lines.findIndex((l) => {
+    const s = l.toLowerCase();
+    return (
+      s.includes("termin") &&
+      s.includes("heimmannschaft") &&
+      s.includes("gastmannschaft")
+    );
+  });
   if (headerIdx === -1) return [];
 
   const matches = [];
+
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const line = lines[i];
+    const lower = line.toLowerCase();
 
-    if (line.toLowerCase().startsWith("spielleiter")) break;
+    if (lower.startsWith("spielleiter")) break;
+    if (lower.startsWith("btv-hotline")) break;
+
+    // normalize spacing (pdftotext -layout creates weird gaps)
+    const s = line.replace(/\s+/g, " ").trim();
 
     // Example:
-    // So. 05.10.2025 15:00   TeG Alzstadt   TC Rimsting II   2:4
-    const m = line.match(
-      /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})\s+(.+?)\s{2,}(.+?)\s{2,}(\d+:\d+)\s*$/
+    // "So. 05.10.2025 15:00 TeG Alzstadt TC Rimsting II 2:4"
+    const m = s.match(
+      /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})\s+(.+?)\s+(.+?)\s+(\d+:\d+)\s*$/
     );
 
     if (m) {
@@ -108,9 +144,9 @@ function parseMatches(text) {
       continue;
     }
 
-    // Hallen-Info-Zeilen mitnehmen, falls du willst (optional)
-    if (matches.length && line.toLowerCase().startsWith("halle:")) {
-      matches[matches.length - 1].halle = line.replace(/^halle:\s*/i, "");
+    // Hallen-Info: attach to previous match if present
+    if (matches.length && lower.startsWith("halle:")) {
+      matches[matches.length - 1].halle = line.replace(/^halle:\s*/i, "").trim();
     }
   }
 
@@ -118,14 +154,28 @@ function parseMatches(text) {
 }
 
 function computeNextMatches(matches) {
-  // naive: first 3, später sortieren nach Datum
-  return matches.slice(0, 3);
+  // Sort by date+time (dd.mm.yyyy)
+  const toTs = (m) => {
+    const [dd, mm, yyyy] = (m.datum || "").split(".");
+    const time = (m.uhrzeit || "00:00").split(":");
+    const dt = new Date(
+      Number(yyyy),
+      Number(mm) - 1,
+      Number(dd),
+      Number(time[0]),
+      Number(time[1])
+    );
+    const ts = dt.getTime();
+    return Number.isNaN(ts) ? Infinity : ts;
+  };
+
+  const sorted = [...matches].sort((a, b) => toTs(a) - toTs(b));
+  return sorted.slice(0, 3);
 }
 
 function buildPayload(teamId, text) {
   const table = parseRanking(text);
   const matches = parseMatches(text);
-
   const status = table.length || matches.length ? "ACTIVE" : "PENDING";
 
   return {
@@ -134,15 +184,16 @@ function buildPayload(teamId, text) {
     table,
     matches,
     next_matches: computeNextMatches(matches),
-    text_preview: text.slice(0, 2000), // kannst du später rauswerfen
+    text_preview: text.slice(0, 2000),
   };
 }
-
 
 async function main() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  if (!url || !key) {
+    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  }
 
   const supabase = createClient(url, key);
 
@@ -159,9 +210,15 @@ async function main() {
     const text = pdfToText(pdfPath);
 
     const payload = buildPayload(teamId, text);
-    console.log("payload keys:", Object.keys(payload));
-console.log("table len:", payload.table.length, "matches len:", payload.matches.length);
 
+    // Optional debug:
+    console.log("payload keys:", Object.keys(payload));
+    console.log(
+      "table len:",
+      payload.table?.length,
+      "matches len:",
+      payload.matches?.length
+    );
 
     const { error } = await supabase.from("team_cache").upsert({
       team_id: teamId,
