@@ -454,9 +454,6 @@ useEffect(() => {
 
   return (
     <View style={styles.container}>
-      <Text style={{ color: "yellow", fontWeight: "800", padding: 6 }}>
-  BOOKING DEBUG ✅
-</Text>
 
       <StatusBar barStyle="light-content" />
 
