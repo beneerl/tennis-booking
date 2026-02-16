@@ -143,6 +143,10 @@ export default function LKScreen({ route }) {
   const [lbLoading, setLbLoading] = useState(false);
   const [lbRefreshing, setLbRefreshing] = useState(false);
 
+  // Partner Picker (nur für Partner-LK)
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [search, setSearch] = useState("");
+
   // Formular
   const [opponentLK, setOpponentLK] = useState("");
   const [type, setType] = useState("single");
@@ -152,6 +156,14 @@ export default function LKScreen({ route }) {
 
   // Verlauf
   const [history, setHistory] = useState([]);
+
+  const filteredLeaderboard = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return leaderboard;
+    return leaderboard.filter((p) =>
+      String(p.display_name || "").toLowerCase().includes(q)
+    );
+  }, [leaderboard, search]);
 
   const saveProfileLocal = async (next) => {
     await AsyncStorage.setItem(STORAGE_PROFILE, JSON.stringify(next));
@@ -301,6 +313,7 @@ export default function LKScreen({ route }) {
       }
 
       delta = round3(Math.max(0, delta));
+      // ✅ Subtraktion: Sieg => LK wird kleiner (besser)
       lkAfter = clampLK(round3(lkBefore - delta));
     } else {
       delta = 0;
@@ -496,6 +509,20 @@ export default function LKScreen({ route }) {
                     placeholderTextColor="#7f93b0"
                   />
 
+                  {/* ✅ Nur hier: Partner aus Rangliste wählen */}
+                  <TouchableOpacity
+                    style={styles.pickBtn}
+                    onPress={() => {
+                      setSearch("");
+                      setPickerOpen(true);
+                      // sicherstellen, dass Rangliste frisch ist
+                      loadLeaderboard();
+                    }}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.pickBtnText}>Partner aus Rangliste wählen</Text>
+                  </TouchableOpacity>
+
                   <Text style={styles.label}>Gegner-LK 1</Text>
                   <TextInput
                     value={opponentLK}
@@ -564,7 +591,13 @@ export default function LKScreen({ route }) {
 
         {tab === "board" && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>Rangliste</Text>
+            <View style={styles.boardHeaderRow}>
+              <Text style={styles.cardTitle}>Rangliste</Text>
+
+              <TouchableOpacity onPress={loadLeaderboard} style={styles.refreshBtn} activeOpacity={0.9}>
+                <Text style={styles.refreshText}>↻</Text>
+              </TouchableOpacity>
+            </View>
 
             {lbLoading ? (
               <View style={{ paddingVertical: 12 }}>
@@ -595,7 +628,8 @@ export default function LKScreen({ route }) {
                           {p.display_name}
                         </Text>
                         <Text style={styles.boardMeta}>
-                          zuletzt: {p.updated_at ? new Date(p.updated_at).toLocaleDateString("de-DE") : "—"}
+                          zuletzt:{" "}
+                          {p.updated_at ? new Date(p.updated_at).toLocaleDateString("de-DE") : "—"}
                         </Text>
                       </View>
                       <Text style={styles.boardLK}>{fmt(round3(p.lk_current))}</Text>
@@ -607,6 +641,52 @@ export default function LKScreen({ route }) {
           </View>
         )}
       </ScrollView>
+
+      {/* ✅ Modal: Partner aus Rangliste wählen */}
+      {pickerOpen && (
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalBox}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Partner auswählen</Text>
+              <TouchableOpacity onPress={() => setPickerOpen(false)} style={styles.modalClose} activeOpacity={0.9}>
+                <Text style={styles.modalCloseText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Suchen…"
+              placeholderTextColor="#7f93b0"
+              style={styles.searchInput}
+            />
+
+            <ScrollView style={{ maxHeight: 360 }}>
+              {filteredLeaderboard.length === 0 ? (
+                <Text style={styles.muted}>Keine Treffer.</Text>
+              ) : (
+                filteredLeaderboard.map((p, idx) => (
+                  <TouchableOpacity
+                    key={`${p.display_name}-${idx}`}
+                    style={styles.pickerRow}
+                    onPress={() => {
+                      // ✅ setzt Partner-LK (nur Partner!)
+                      setPartnerLK(fmt(round3(p.lk_current)));
+                      setPickerOpen(false);
+                    }}
+                    activeOpacity={0.9}
+                  >
+                    <Text style={styles.pickerName} numberOfLines={1}>
+                      {p.display_name}
+                    </Text>
+                    <Text style={styles.pickerLK}>{fmt(round3(p.lk_current))}</Text>
+                  </TouchableOpacity>
+                ))
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      )}
     </View>
   );
 }
@@ -704,6 +784,7 @@ const styles = StyleSheet.create({
   hMain: { color: "#fff", fontWeight: "900", fontSize: 12 },
   hSub: { color: "#9fb0c8", marginTop: 4, fontSize: 12, fontWeight: "800" },
 
+  // Rangliste
   boardRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -712,8 +793,87 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "rgba(255,255,255,0.08)",
   },
+  boardHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  refreshBtn: {
+    width: 44,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#355a8a",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  refreshText: { color: "#ffffff", fontSize: 18, fontWeight: "900" },
+
   boardRank: { width: 36, color: "#9fb0c8", fontWeight: "900" },
   boardName: { color: "#ffffff", fontWeight: "900" },
   boardMeta: { color: "#9fb0c8", marginTop: 2, fontSize: 11, fontWeight: "800" },
   boardLK: { color: "#f28b25", fontWeight: "900", fontSize: 14 },
+
+  // Partner Picker Modal
+  pickBtn: {
+    marginTop: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#355a8a",
+    paddingVertical: 10,
+    alignItems: "center",
+    backgroundColor: "rgba(8, 35, 80, 0.55)",
+  },
+  pickBtnText: { color: "#ffffff", fontWeight: "900" },
+
+  modalOverlay: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "flex-end",
+    alignItems: "center",
+  },
+  modalBox: {
+    width: "96%",
+    backgroundColor: "#001e4f",
+    borderRadius: 22,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: "#355a8a",
+    marginBottom: 24,
+  },
+  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+  modalTitle: { color: "#fff", fontSize: 16, fontWeight: "900" },
+  modalClose: { padding: 8 },
+  modalCloseText: { color: "#fff", fontSize: 16, fontWeight: "900" },
+
+  searchInput: {
+    marginTop: 10,
+    borderWidth: 1,
+    borderColor: "#355a8a",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: "#fff",
+    fontWeight: "800",
+  },
+
+  pickerRow: {
+    marginTop: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#355a8a",
+    backgroundColor: "rgba(8, 35, 80, 0.55)",
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  pickerName: { color: "#fff", fontWeight: "900", flex: 1, paddingRight: 10 },
+  pickerLK: { color: "#f28b25", fontWeight: "900" },
 });
