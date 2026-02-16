@@ -1,19 +1,132 @@
 // screens/LKScreen.js
 import React, { useEffect, useMemo, useState } from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, Switch } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  ScrollView,
+  Switch,
+  StatusBar,
+} from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const STORAGE_PROFILE = "lk_profile_v1";
 const STORAGE_HISTORY = "lk_history_v1";
 
-// Helpers
+// ===== Helpers =====
 const toNumber = (v) => {
-  const n = Number(String(v).replace(",", "."));
+  const n = Number(String(v ?? "").replace(",", ".").trim());
   return Number.isFinite(n) ? n : null;
 };
+
 const round3 = (n) => Math.round(n * 1000) / 1000;
-const clampLK = (n) => Math.max(1, Math.min(25, n)); // grob – kann man später präzisieren
+
+// LK grob begrenzen (DTB LK-System geht typ. 1..25)
+const clampLK = (n) => Math.max(1, Math.min(25, n));
+
 const uid = () => `${Date.now()}_${Math.random().toString(16).slice(2)}`;
+
+const weeksBetween = (isoA, isoB) => {
+  if (!isoA || !isoB) return 0;
+  const a = new Date(isoA).getTime();
+  const b = new Date(isoB).getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return 0;
+  const days = (b - a) / (1000 * 60 * 60 * 24);
+  return Math.floor(days / 7);
+};
+
+const fmt = (n) => String(n ?? "").replace(".", ",");
+
+// ===== BTV/DTB LK-Berechnung (Anhänge A.1–A.4) =====
+
+// A.1 Punktefunktion P (d = Sieger-LK - Verlierer-LK)
+const calcP = (d) => {
+  if (d <= -4) return 10;
+  if (d > -4 && d <= -2) return 1.25 * d ** 3 + 15 * d ** 2 + 60 * d + 90;
+  if (d > -2 && d <= 4) return 15 * d + 50;
+  if (d > 4 && d <= 6) return -3.75 * d ** 2 + 45 * d - 10;
+  return 125; // d > 6
+};
+
+// A.2 Hürde H (abhängig von Sieger-LK)
+const calcH = (lkWinner) => {
+  if (lkWinner >= 10) return 10 * (30 - lkWinner);
+  return (
+    10 * (30 - lkWinner) +
+    (6435 / 289) * ((20 * (5 - lkWinner)) / (lkWinner ** 2 + 1))
+  );
+};
+
+// A.3 Altersklassenfaktor A – für Herren (m)
+// Für euch i. d. R. "Offene Klasse" => 100%
+const A_TABLE_M = {
+  10: 25,
+  11: 30,
+  12: 40,
+  13: 50,
+  14: 60,
+  15: 70,
+  16: 80,
+  17: 90,
+  18: 100,
+  21: 100,
+  "Offene Klasse": 100,
+  30: 90,
+  35: 85,
+  40: 80,
+  45: 75,
+  50: 70,
+  55: 65,
+  60: 60,
+  65: 55,
+  70: 50,
+  75: 45,
+  80: 40,
+  85: 35,
+  90: 30,
+};
+
+const calcA = (ageClass = "Offene Klasse") => (A_TABLE_M[ageClass] ?? 100) / 100;
+
+// A.4 Zählweisenfaktor Z – Standard: 100%, Kurzsatz: 75%
+const calcZ = (format = "standard") => (format === "short" ? 0.75 : 1.0);
+
+// LK-Verbesserung für Sieger (Einzel): (P/H) * A * Z
+const calcImprovementSingle = ({
+  winnerLK,
+  loserLK,
+  ageClass = "Offene Klasse",
+  format = "standard",
+}) => {
+  const d = winnerLK - loserLK;
+  const P = calcP(d);
+  const H = calcH(winnerLK);
+  const A = calcA(ageClass);
+  const Z = calcZ(format);
+  return (P / H) * A * Z;
+};
+
+// Doppelregel: mit arithm. Mitteln; Ergebnis zu 50% auf beide Sieger verteilt
+const calcImprovementDoubleForOneWinner = ({
+  winnerLK,
+  winnerPartnerLK,
+  loserLK,
+  loserPartnerLK,
+  ageClass = "Offene Klasse",
+  format = "standard",
+}) => {
+  const winnerAvg = (winnerLK + winnerPartnerLK) / 2;
+  const loserAvg = (loserLK + loserPartnerLK) / 2;
+  const base = calcImprovementSingle({
+    winnerLK: winnerAvg,
+    loserLK: loserAvg,
+    ageClass,
+    format,
+  });
+  return base * 0.5;
+};
 
 export default function LKScreen() {
   const [loading, setLoading] = useState(true);
@@ -28,22 +141,12 @@ export default function LKScreen() {
   const [type, setType] = useState("single"); // single | double
   const [result, setResult] = useState("W"); // W | L
 
+  // Doppel optional
+  const [partnerLK, setPartnerLK] = useState("");
+  const [opponentPartnerLK, setOpponentPartnerLK] = useState("");
+
   // Verlauf
   const [history, setHistory] = useState([]);
-
-  // ---- Placeholder-Berechnung (wird ersetzt, sobald wir die BTV-Tabellen sauber drin haben) ----
-  // Aktuell: nur simple "Schätzdifferenz" damit UI/Flow schon funktioniert.
-  const computeDeltaPlaceholder = (own, opp, matchType) => {
-    // Wenn Gegner besser (kleinere LK-Zahl) -> weniger Gewinn, wenn Gegner schlechter -> mehr Gewinn
-    const diff = (opp - own); // positiv = Gegner schlechter
-    let base = 0.12 + Math.max(-0.08, Math.min(0.18, diff * 0.02));
-    if (matchType === "double") base *= 0.5; // Doppel grob halb
-    // optional Motivation (rein als UI-Demo; später korrekt)
-    if (useMotivation) base += 0.025;
-    // Punktspiel-Bonus +10% (bei euch immer Punktspiel)
-    base *= 1.1;
-    return Math.max(0, base);
-  };
 
   const load = async () => {
     try {
@@ -83,41 +186,85 @@ export default function LKScreen() {
   const onAddMatch = async () => {
     const own = toNumber(currentLK);
     const opp = toNumber(opponentLK);
-
     if (!own || !opp) return;
 
-    const before = own;
+    const nowIso = new Date().toISOString();
+    const lastIso = history?.[0]?.date || null;
+
+    // optional Motivationsaufschlag: +0,025 je volle Woche seit letztem Eintrag (bis LK 25)
+    let lkBefore = own;
+    let motivationApplied = 0;
+
+    if (useMotivation && lastIso) {
+      const w = weeksBetween(lastIso, nowIso);
+      if (w > 0) {
+        motivationApplied = round3(Math.min(25 - lkBefore, w * 0.025));
+        lkBefore = clampLK(round3(lkBefore + motivationApplied));
+      }
+    }
 
     let delta = 0;
-    let after = before;
+    let lkAfter = lkBefore;
+
+    // Punktspiel-Bonus +10% (bei euch: immer Punktspiel)
+    const TEAM_BONUS = 1.1;
 
     if (result === "W") {
-      delta = computeDeltaPlaceholder(before, opp, type);
-      // LK wird besser => Zahl wird kleiner
-      after = clampLK(round3(before - delta));
+      if (type === "single") {
+        const base = calcImprovementSingle({
+          winnerLK: lkBefore,
+          loserLK: opp,
+          ageClass: "Offene Klasse",
+          format: "standard",
+        });
+        delta = base * TEAM_BONUS;
+      } else {
+        // Doppel: Partner LK optional, Gegner-Partner optional
+        const pLK = toNumber(partnerLK) ?? lkBefore;
+        const oppPLK = toNumber(opponentPartnerLK) ?? opp;
+
+        const base = calcImprovementDoubleForOneWinner({
+          winnerLK: lkBefore,
+          winnerPartnerLK: pLK,
+          loserLK: opp,
+          loserPartnerLK: oppPLK,
+          ageClass: "Offene Klasse",
+          format: "standard",
+        });
+        delta = base * TEAM_BONUS;
+      }
+
+      delta = round3(Math.max(0, delta));
+      lkAfter = clampLK(round3(lkBefore - delta)); // Sieg => Zahl wird kleiner (besser)
     } else {
-      // Verlierer bleibt (offiziell) unverändert -> delta = 0
+      // Niederlage: Verlierer bleibt unberührt (delta = 0)
       delta = 0;
-      after = before;
+      lkAfter = lkBefore;
     }
 
     const entry = {
       id: uid(),
-      date: new Date().toISOString(),
+      date: nowIso,
       type,
       opponentLK: opp,
+      opponentPartnerLK: toNumber(opponentPartnerLK) ?? null,
+      partnerLK: toNumber(partnerLK) ?? null,
       result,
-      delta: round3(delta),
-      lkBefore: round3(before),
-      lkAfter: round3(after),
+      motivationApplied,
+      delta,
+      lkBefore: round3(lkBefore),
+      lkAfter: round3(lkAfter),
     };
 
     const nextHistory = [entry, ...history];
     setHistory(nextHistory);
     await saveHistory(nextHistory);
 
-    if (autoUpdate) setCurrentLK(after);
+    if (autoUpdate) setCurrentLK(lkAfter);
+
     setOpponentLK("");
+    setPartnerLK("");
+    setOpponentPartnerLK("");
   };
 
   const onUndo = async () => {
@@ -126,8 +273,7 @@ export default function LKScreen() {
     setHistory(rest);
     await saveHistory(rest);
 
-    // Wenn AutoUpdate: LK zurücksetzen auf "lkBefore" des letzten Eintrags
-    if (autoUpdate && latest?.lkBefore) setCurrentLK(latest.lkBefore);
+    if (autoUpdate && latest?.lkBefore != null) setCurrentLK(latest.lkBefore);
   };
 
   const headerLK = useMemo(() => round3(toNumber(currentLK) ?? 0), [currentLK]);
@@ -135,6 +281,7 @@ export default function LKScreen() {
   if (loading) {
     return (
       <View style={styles.container}>
+        <StatusBar barStyle="light-content" />
         <Text style={styles.title}>LK</Text>
         <Text style={styles.muted}>Lade…</Text>
       </View>
@@ -143,20 +290,26 @@ export default function LKScreen() {
 
   return (
     <View style={styles.container}>
+      <StatusBar barStyle="light-content" />
+
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         <Text style={styles.title}>LK</Text>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Aktuelle LK</Text>
           <TextInput
-            value={String(currentLK).replace(".", ",")}
-            onChangeText={(t) => setCurrentLK(toNumber(t) ?? currentLK)}
+            value={fmt(currentLK)}
+            onChangeText={(t) => {
+              const n = toNumber(t);
+              if (n == null) return;
+              setCurrentLK(n);
+            }}
             keyboardType="decimal-pad"
             style={styles.input}
             placeholder="z.B. 16,3"
             placeholderTextColor="#7f93b0"
           />
-          <Text style={styles.bigLK}>{String(headerLK).replace(".", ",")}</Text>
+          <Text style={styles.bigLK}>{fmt(headerLK)}</Text>
 
           <View style={styles.row}>
             <Text style={styles.rowLabel}>LK nach Eintrag aktualisieren</Text>
@@ -169,7 +322,7 @@ export default function LKScreen() {
           </View>
 
           <Text style={styles.note}>
-            Hinweis: Berechnung ist aktuell noch ein Platzhalter – als nächstes ersetzen wir das durch die offiziellen BTV-Tabellen (P/H/A/Z).
+            Motivation: +0,025 je voller Woche seit dem letzten Eintrag (bis LK 25).
           </Text>
         </View>
 
@@ -182,14 +335,18 @@ export default function LKScreen() {
               onPress={() => setType("single")}
               activeOpacity={0.9}
             >
-              <Text style={[styles.segText, type === "single" && styles.segTextActive]}>Einzel</Text>
+              <Text style={[styles.segText, type === "single" && styles.segTextActive]}>
+                Einzel
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.seg, type === "double" && styles.segActive]}
               onPress={() => setType("double")}
               activeOpacity={0.9}
             >
-              <Text style={[styles.segText, type === "double" && styles.segTextActive]}>Doppel</Text>
+              <Text style={[styles.segText, type === "double" && styles.segTextActive]}>
+                Doppel
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -199,14 +356,18 @@ export default function LKScreen() {
               onPress={() => setResult("W")}
               activeOpacity={0.9}
             >
-              <Text style={[styles.segText, result === "W" && styles.segTextActive]}>Sieg</Text>
+              <Text style={[styles.segText, result === "W" && styles.segTextActive]}>
+                Sieg
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.seg, result === "L" && styles.segActive]}
               onPress={() => setResult("L")}
               activeOpacity={0.9}
             >
-              <Text style={[styles.segText, result === "L" && styles.segTextActive]}>Niederlage</Text>
+              <Text style={[styles.segText, result === "L" && styles.segTextActive]}>
+                Niederlage
+              </Text>
             </TouchableOpacity>
           </View>
 
@@ -219,6 +380,30 @@ export default function LKScreen() {
             placeholder="z.B. 14,8"
             placeholderTextColor="#7f93b0"
           />
+
+          {type === "double" && (
+            <>
+              <Text style={styles.label}>Partner-LK (optional, für korrekte Doppelrechnung)</Text>
+              <TextInput
+                value={partnerLK}
+                onChangeText={setPartnerLK}
+                keyboardType="decimal-pad"
+                style={styles.input}
+                placeholder="z.B. 18,5"
+                placeholderTextColor="#7f93b0"
+              />
+
+              <Text style={styles.label}>Gegner Partner-LK (optional)</Text>
+              <TextInput
+                value={opponentPartnerLK}
+                onChangeText={setOpponentPartnerLK}
+                keyboardType="decimal-pad"
+                style={styles.input}
+                placeholder="z.B. 16,2"
+                placeholderTextColor="#7f93b0"
+              />
+            </>
+          )}
 
           <TouchableOpacity style={styles.primaryBtn} onPress={onAddMatch} activeOpacity={0.9}>
             <Text style={styles.primaryText}>Eintrag speichern</Text>
@@ -238,10 +423,12 @@ export default function LKScreen() {
             history.map((h) => (
               <View key={h.id} style={styles.historyRow}>
                 <Text style={styles.hMain}>
-                  {h.result === "W" ? "✅ Sieg" : "❌ Niederlage"} · {h.type === "single" ? "Einzel" : "Doppel"} · Gegner {String(h.opponentLK).replace(".", ",")}
+                  {h.result === "W" ? "✅ Sieg" : "❌ Niederlage"} ·{" "}
+                  {h.type === "single" ? "Einzel" : "Doppel"} · Gegner {fmt(h.opponentLK)}
                 </Text>
                 <Text style={styles.hSub}>
-                  LK {String(h.lkBefore).replace(".", ",")} → {String(h.lkAfter).replace(".", ",")} · Δ {String(h.delta).replace(".", ",")}
+                  LK {fmt(h.lkBefore)} → {fmt(h.lkAfter)} · Δ {fmt(h.delta)}
+                  {h.motivationApplied ? ` · Motivation +${fmt(h.motivationApplied)}` : ""}
                 </Text>
               </View>
             ))
