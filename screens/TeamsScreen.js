@@ -181,10 +181,7 @@ export default function TeamsScreen({ navigation }) {
               </>
             )}
 
-            {/* Back link */}
-            <TouchableOpacity onPress={goBackSmart} style={styles.linkBtn}>
-              <Text style={styles.linkText}>← Zurück</Text>
-            </TouchableOpacity>
+
           </>
         )}
       </ScrollView>
