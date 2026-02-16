@@ -35,39 +35,47 @@ function pdfToText(pdfPath) {
   return fs.readFileSync(txtPath, "utf8");
 }
 
+function isDowStart(line) {
+  return /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)\s+\d{2}\.\d{2}\.\d{4}\s+\d{2}:\d{2}/.test(
+    line.trim()
+  );
+}
+
+// --------------- PARSE TABLE (Ranking) ---------------
 function parseRanking(text) {
-  const lines = text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length);
+  const lines = text.split(/\r?\n/);
 
   const headerIdx = lines.findIndex((l) =>
-    l.toLowerCase().startsWith("rang mannschaft")
+    l.trim().toLowerCase().startsWith("rang mannschaft")
   );
   if (headerIdx === -1) return [];
 
   const rows = [];
+
   for (let i = headerIdx + 1; i < lines.length; i++) {
-    const line = lines[i];
+    const raw = lines[i];
+    const line = raw.trim();
     const lower = line.toLowerCase();
 
-    // Stop when schedule header begins or footer
-    if (
-      lower.includes("termin") &&
-      lower.includes("heimmannschaft") &&
-      lower.includes("gastmannschaft")
-    )
-      break;
+    if (!line) continue;
     if (lower.startsWith("spielleiter")) break;
     if (lower.startsWith("btv-hotline")) break;
 
-    // Robust parse: split tokens; last 5 tokens are numeric/scores
-    const parts = line.split(/\s+/);
-    if (parts.length < 8) continue;
+    // stop when schedule lines begin
+    if (isDowStart(line)) break;
 
+    // IMPORTANT: Some PDFs merge ranking + schedule into one line.
+    // We only take the "ranking part" BEFORE any weekday token appears.
+    // Example merged line contains: " ... 277:104   So. 05.10.2025 15:00 ..."
+    const cut = line.replace(/\s+(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)\s+.*/, "");
+    const parts = cut.split(/\s+/);
+
+    if (parts.length < 8) continue;
     if (!/^\d+$/.test(parts[0])) continue;
 
     const rang = Number(parts[0]);
+
+    // last 5 tokens should be: Beg. Punkte Matches Sätze Spiele
     const spiele = parts[parts.length - 1];
     const saetze = parts[parts.length - 2];
     const matches = parts[parts.length - 3];
@@ -95,76 +103,100 @@ function parseRanking(text) {
       });
     }
   }
+
   return rows;
 }
 
-function parseMatches(text) {
-  const lines = text
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length);
+// --------------- PARSE MATCHES ---------------
+function parseMatches(text, teamNames) {
+  const lines = text.split(/\r?\n/).map((l) => l.replace(/\s+$/, ""));
 
-  const headerIdx = lines.findIndex((l) => {
-    const s = l.toLowerCase();
-    return (
-      s.includes("termin") &&
-      s.includes("heimmannschaft") &&
-      s.includes("gastmannschaft")
-    );
-  });
-  if (headerIdx === -1) return [];
+  // Sort team names longest-first so matching works properly
+  const teams = [...teamNames].sort((a, b) => b.length - a.length);
 
   const matches = [];
+  let inSchedule = false;
 
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    const line = lines[i];
+  for (const raw of lines) {
+    const line = raw.trim();
     const lower = line.toLowerCase();
+    if (!line) continue;
+
+    if (
+      lower.includes("termin") &&
+      lower.includes("heimmannschaft") &&
+      lower.includes("gastmannschaft")
+    ) {
+      inSchedule = true;
+      continue;
+    }
+    if (!inSchedule) continue;
 
     if (lower.startsWith("spielleiter")) break;
     if (lower.startsWith("btv-hotline")) break;
 
-    // normalize spacing (pdftotext -layout creates weird gaps)
-    const s = line.replace(/\s+/g, " ").trim();
-
-    // Example:
-    // "So. 05.10.2025 15:00 TeG Alzstadt TC Rimsting II 2:4"
-    const m = s.match(
-      /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})\s+(.+?)\s+(.+?)\s+(\d+:\d+)\s*$/
-    );
-
-    if (m) {
-      matches.push({
-        wochentag: m[1],
-        datum: m[2],
-        uhrzeit: m[3],
-        heim: m[4],
-        gast: m[5],
-        erg: m[6],
-      });
+    // Hallen line
+    if (matches.length && lower.startsWith("halle:")) {
+      matches[matches.length - 1].halle = line.replace(/^halle:\s*/i, "").trim();
       continue;
     }
 
-    // Hallen-Info: attach to previous match if present
-    if (matches.length && lower.startsWith("halle:")) {
-      matches[matches.length - 1].halle = line.replace(/^halle:\s*/i, "").trim();
+    // Match line must start with DOW + date + time
+    const head = line.match(
+      /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{2}:\d{2})\s+(.+)$/
+    );
+    if (!head) continue;
+
+    const wochentag = head[1];
+    const datum = head[2];
+    const uhrzeit = head[3];
+    let rest = head[4];
+
+    // cut off trailing result "2:4"
+    const resMatch = rest.match(/(.+?)\s+(\d+:\d+)\s*$/);
+    if (!resMatch) continue;
+
+    rest = resMatch[1].trim();
+    const erg = resMatch[2];
+
+    // Try to identify "gast" as one of the known team names at the END of rest
+    let gast = null;
+    let heim = null;
+
+    for (const t of teams) {
+      if (rest.endsWith(t)) {
+        gast = t;
+        heim = rest.slice(0, rest.length - t.length).trim();
+        break;
+      }
     }
+
+    // Fallback if not found: split by multiple spaces from original raw line (layout)
+    if (!gast || !heim) {
+      const mid = head[4].replace(/\s+(\d+:\d+)\s*$/, "").trim(); // before erg
+      const chunks = mid.split(/\s{2,}/).map((c) => c.trim()).filter(Boolean);
+      if (chunks.length >= 2) {
+        // try last two chunks
+        heim = chunks[chunks.length - 2];
+        gast = chunks[chunks.length - 1];
+      } else {
+        // last fallback: cannot reliably split
+        heim = mid;
+        gast = "";
+      }
+    }
+
+    matches.push({ wochentag, datum, uhrzeit, heim, gast, erg });
   }
 
   return matches;
 }
 
 function computeNextMatches(matches) {
-  // Sort by date+time (dd.mm.yyyy)
   const toTs = (m) => {
     const [dd, mm, yyyy] = (m.datum || "").split(".");
-    const time = (m.uhrzeit || "00:00").split(":");
-    const dt = new Date(
-      Number(yyyy),
-      Number(mm) - 1,
-      Number(dd),
-      Number(time[0]),
-      Number(time[1])
-    );
+    const [hh, mi] = (m.uhrzeit || "00:00").split(":");
+    const dt = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(mi));
     const ts = dt.getTime();
     return Number.isNaN(ts) ? Infinity : ts;
   };
@@ -175,7 +207,9 @@ function computeNextMatches(matches) {
 
 function buildPayload(teamId, text) {
   const table = parseRanking(text);
-  const matches = parseMatches(text);
+  const teamNames = table.map((r) => r.mannschaft);
+
+  const matches = parseMatches(text, teamNames);
   const status = table.length || matches.length ? "ACTIVE" : "PENDING";
 
   return {
@@ -191,9 +225,7 @@ function buildPayload(teamId, text) {
 async function main() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
-  }
+  if (!url || !key) throw new Error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
 
   const supabase = createClient(url, key);
 
@@ -211,14 +243,8 @@ async function main() {
 
     const payload = buildPayload(teamId, text);
 
-    // Optional debug:
     console.log("payload keys:", Object.keys(payload));
-    console.log(
-      "table len:",
-      payload.table?.length,
-      "matches len:",
-      payload.matches?.length
-    );
+    console.log("table len:", payload.table.length, "matches len:", payload.matches.length);
 
     const { error } = await supabase.from("team_cache").upsert({
       team_id: teamId,
