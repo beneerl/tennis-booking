@@ -12,6 +12,78 @@ import {
 
 // ✅ echte Backend-URL
 const API_BASE_URL = "https://tennis-booking-tau.vercel.app";
+const OUR_CLUB = "TeG Alzstadt";
+
+const stripClubId = (s) => String(s || "").replace(/\s*\(\d+\)\s*$/, "").trim();
+
+const parseDEDateTime = (datum, uhrzeit) => {
+  if (!datum) return null;
+  const [dd, mm, yyyy] = String(datum).split(".");
+  const [hh, min] = String(uhrzeit || "00:00").split(":");
+  const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), 0, 0);
+  return isNaN(d.getTime()) ? null : d;
+};
+
+const isPlayed = (m) => String(m?.erg || "").trim().length > 0;
+
+const computeHomeFlag = (m) => {
+  const heim = stripClubId(m?.heim);
+  return heim.toLowerCase().includes(OUR_CLUB.toLowerCase());
+};
+
+const buildOpponentText = (m) => {
+  const heim = stripClubId(m?.heim);
+  const gast = stripClubId(m?.gast);
+  const erg = String(m?.erg || "").trim();
+  return erg ? `${heim} vs ${gast} (${erg})` : `${heim} vs ${gast}`;
+};
+
+const mapMatch = (m) => {
+  const d = parseDEDateTime(m?.datum, m?.uhrzeit);
+  return {
+    id: `${m?.datum}-${m?.uhrzeit}-${m?.heim}-${m?.gast}`,
+    date: d ? d.toISOString() : null,
+    dateObj: d,
+    home: computeHomeFlag(m),
+    opponent: buildOpponentText(m),
+    venue: m?.halle || "—",
+    erg: String(m?.erg || "").trim(),
+    heim: stripClubId(m?.heim),
+    gast: stripClubId(m?.gast),
+  };
+};
+
+const sortByDateAsc = (a, b) => (a?.dateObj?.getTime?.() ?? 0) - (b?.dateObj?.getTime?.() ?? 0);
+const sortByDateDesc = (a, b) => (b?.dateObj?.getTime?.() ?? 0) - (a?.dateObj?.getTime?.() ?? 0);
+
+const splitMatches = (all) => {
+  const now = new Date();
+  const upcoming = [];
+  const played = [];
+
+  for (const m of all) {
+    if (!m?.dateObj) continue;
+
+    if (isPlayed(m)) {
+      played.push(m);
+      continue;
+    }
+
+    if (m.dateObj >= now) upcoming.push(m);
+    else played.push(m);
+  }
+
+  upcoming.sort(sortByDateAsc);
+  played.sort(sortByDateDesc);
+
+  return { upcoming, played };
+};
+
+const involvesOurClub = (m) => {
+  const o = OUR_CLUB.toLowerCase();
+  return String(m?.heim || "").toLowerCase().includes(o) || String(m?.gast || "").toLowerCase().includes(o);
+};
+
 
 function formatDateTimeDE(iso) {
   if (!iso) return "—";
@@ -94,7 +166,8 @@ export default function TeamDetailsScreen({ route, navigation }) {
     route?.params?.team ||
     "Team";
 
-  const [tab, setTab] = useState("overview"); // overview | matches | table
+const [tab, setTab] = useState("teg");
+ // overview | matches | table
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
@@ -194,7 +267,7 @@ const mapMatch = (m) => {
   return {
     id: `${m?.datum}-${m?.uhrzeit}-${m?.heim}-${m?.gast}-${m?.erg}`,
     date: dateIso,
-    home: true, // später optional korrekt setzen
+    home: isHome, // später optional korrekt setzen
     opponent: `${m?.heim || "—"} vs ${m?.gast || "—"}${score}`,
     venue: m?.halle || "—",
   };
@@ -205,12 +278,15 @@ const matches = apiMatches.map(mapMatch); // alle Begegnungen
 
 const nextMatch = upcoming[0] || null;
 
+const stripClubId = (s) => String(s || "").replace(/\s*\(\d+\)\s*$/, "").trim();
+
 const table = (payload?.table || []).map((r) => ({
-  rank: r?.rang,
-  club: r?.mannschaft,
-  played: r?.begegnungen,
-  points: r?.punkte,
+  rank: Number(r?.rang ?? 0) || 0,
+  club: stripClubId(r?.mannschaft),
+  played: Number(r?.begegnungen ?? 0) || 0,
+  points: r?.punkte || "—",
 }));
+
 
 
   if (loading) {
@@ -268,9 +344,7 @@ const table = (payload?.table || []).map((r) => ({
             </Text>
           )}
 
-          <Text style={styles.lastUpdated}>
-            Letztes Update: {formatDateTimeDE(new Date().toISOString())}
-          </Text>
+
 
           {/* Next match highlight */}
           <View style={styles.nextMatchCard}>
@@ -297,11 +371,12 @@ const table = (payload?.table || []).map((r) => ({
         </View>
 
         {/* Tabs */}
-        <View style={styles.tabsRow}>
-          <TabButton label="Übersicht" active={tab === "overview"} onPress={() => setTab("overview")} />
-          <TabButton label="Begegnungen" active={tab === "matches"} onPress={() => setTab("matches")} />
-          <TabButton label="Tabelle" active={tab === "table"} onPress={() => setTab("table")} />
-        </View>
+<View style={styles.tabsRow}>
+  <TabButton label="TEG" active={tab === "teg"} onPress={() => setTab("teg")} />
+  <TabButton label="Tabelle" active={tab === "table"} onPress={() => setTab("table")} />
+  <TabButton label="Liga" active={tab === "liga"} onPress={() => setTab("liga")} />
+</View>
+
 
         {/* ======= OVERVIEW ======= */}
         {tab === "overview" && (
