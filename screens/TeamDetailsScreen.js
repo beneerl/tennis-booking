@@ -306,10 +306,10 @@ export default function TeamDetailsScreen({ route, navigation }) {
 
                 <View style={styles.teamsRow}>
                   <View style={{ flex: 1, paddingRight: 10 }}>
-                    <Text style={styles.teamLine} numberOfLines={1}>
+                    <Text style={styles.teamLineHero} numberOfLines={1}>
                       {nextMatch.heim || "—"}
                     </Text>
-                    <Text style={styles.teamLine} numberOfLines={1}>
+                    <Text style={styles.teamLineHero} numberOfLines={1}>
                       {nextMatch.gast || "—"}
                     </Text>
                   </View>
@@ -598,9 +598,11 @@ const styles = StyleSheet.create({
     borderColor: "#355a8a",
   },
 
-  matchCardUpcoming: {
-    borderColor: "#355a8a",
-  },
+ matchCardUpcoming: {
+  borderColor: "#f28b25",
+  borderWidth: 2,
+},
+
 
   matchCardPlayed: {
     borderColor: "rgba(255,255,255,0.18)",
@@ -632,6 +634,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
   },
+teamLineHero: {
+  color: "#ffffff",
+  fontSize: 18,      // <- größer als normal
+  lineHeight: 22,
+  fontWeight: "900",
+},
 
   scoreBox: {
     minWidth: 56,
