@@ -32,6 +32,15 @@ const parseDEDateTime = (datum, uhrzeit) => {
 
 const isPlayed = (m) => String(m?.erg || "").trim().length > 0;
 
+// ✅ Status für UI-Highlight (gespielt vs kommend)
+const getMatchState = (m) => {
+  // gespielt, wenn Ergebnis da ist ODER Termin in der Vergangenheit ist
+  if (String(m?.erg || "").trim()) return "played";
+  const t = m?.dateObj?.getTime?.();
+  if (t && t < Date.now()) return "played";
+  return "upcoming";
+};
+
 const involvesOurClub = (m) => {
   const o = OUR_CLUB.toLowerCase();
   const heim = stripClubId(m?.heim).toLowerCase();
@@ -333,19 +342,43 @@ export default function TeamDetailsScreen({ route, navigation }) {
                 <Text style={styles.mutedText}>Keine Begegnungen für TeG Alzstadt gefunden.</Text>
               </View>
             ) : (
-              tegList.map((m) => (
-                <View key={m.id || `${m.date}-${m.opponent}`} style={styles.matchCard}>
-                  <View style={styles.matchTopRow}>
-                    <View style={[styles.chip, m.home ? styles.chipHome : styles.chipAway]}>
-                      <Text style={styles.chipText}>{m.home ? "HEIM" : "AUSWÄRTS"}</Text>
-                    </View>
-                    <Text style={styles.matchDate}>{formatDateDE(m.date)}</Text>
-                  </View>
+              tegList.map((m) => {
+                const state = getMatchState(m);
 
-                  <Text style={styles.matchOpponent}>{m.opponent || "—"}</Text>
-                  <Text style={styles.matchVenue}>{m.venue || "—"}</Text>
-                </View>
-              ))
+                return (
+                  <View
+                    key={m.id || `${m.date}-${m.opponent}`}
+                    style={[
+                      styles.matchCard,
+                      state === "played" ? styles.matchCardPlayed : styles.matchCardUpcoming,
+                    ]}
+                  >
+                    <View style={styles.matchTopRow}>
+                      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+                        <View style={[styles.chip, m.home ? styles.chipHome : styles.chipAway]}>
+                          <Text style={styles.chipText}>{m.home ? "HEIM" : "AUSWÄRTS"}</Text>
+                        </View>
+
+                        <View
+                          style={[
+                            styles.pill,
+                            state === "played" ? styles.pillPlayed : styles.pillUpcoming,
+                          ]}
+                        >
+                          <Text style={styles.pillText}>
+                            {state === "played" ? "GESPIELT" : "KOMMT"}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Text style={styles.matchDate}>{formatDateDE(m.date)}</Text>
+                    </View>
+
+                    <Text style={styles.matchOpponent}>{m.opponent || "—"}</Text>
+                    <Text style={styles.matchVenue}>{m.venue || "—"}</Text>
+                  </View>
+                );
+              })
             )}
           </View>
         )}
@@ -396,19 +429,43 @@ export default function TeamDetailsScreen({ route, navigation }) {
                 <Text style={styles.mutedText}>Keine Liga-Begegnungen gefunden.</Text>
               </View>
             ) : (
-              ligaList.map((m) => (
-                <View key={m.id || `${m.date}-${m.opponent}`} style={styles.matchCard}>
-                  <View style={styles.matchTopRow}>
-                    <View style={[styles.chip, styles.chipNeutral]}>
-                      <Text style={styles.chipText}>LIGA</Text>
-                    </View>
-                    <Text style={styles.matchDate}>{formatDateDE(m.date)}</Text>
-                  </View>
+              ligaList.map((m) => {
+                const state = getMatchState(m);
 
-                  <Text style={styles.matchOpponent}>{m.opponent || "—"}</Text>
-                  <Text style={styles.matchVenue}>{m.venue || "—"}</Text>
-                </View>
-              ))
+                return (
+                  <View
+                    key={m.id || `${m.date}-${m.opponent}`}
+                    style={[
+                      styles.matchCard,
+                      state === "played" ? styles.matchCardPlayed : styles.matchCardUpcoming,
+                    ]}
+                  >
+                    <View style={styles.matchTopRow}>
+                      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+                        <View style={[styles.chip, styles.chipNeutral]}>
+                          <Text style={styles.chipText}>LIGA</Text>
+                        </View>
+
+                        <View
+                          style={[
+                            styles.pill,
+                            state === "played" ? styles.pillPlayed : styles.pillUpcoming,
+                          ]}
+                        >
+                          <Text style={styles.pillText}>
+                            {state === "played" ? "GESPIELT" : "KOMMT"}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <Text style={styles.matchDate}>{formatDateDE(m.date)}</Text>
+                    </View>
+
+                    <Text style={styles.matchOpponent}>{m.opponent || "—"}</Text>
+                    <Text style={styles.matchVenue}>{m.venue || "—"}</Text>
+                  </View>
+                );
+              })
             )}
           </View>
         )}
@@ -524,6 +581,28 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#355a8a",
   },
+
+  // ✅ Highlight je nach Status
+  matchCardUpcoming: {
+    borderColor: "rgba(242, 139, 37, 0.7)",
+    backgroundColor: "rgba(8, 35, 80, 0.65)",
+  },
+  matchCardPlayed: {
+    borderColor: "rgba(53, 90, 138, 0.6)",
+    backgroundColor: "rgba(2, 36, 73, 0.85)",
+  },
+
+  // ✅ Mini-Badge (KOMMT / GESPIELT)
+  pill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  pillUpcoming: { borderColor: "rgba(242, 139, 37, 0.85)" },
+  pillPlayed: { borderColor: "rgba(46, 204, 113, 0.6)" },
+  pillText: { color: "#ffffff", fontSize: 11, fontWeight: "900" },
+
   matchTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
   chipHome: { borderColor: "#2ecc71" },
