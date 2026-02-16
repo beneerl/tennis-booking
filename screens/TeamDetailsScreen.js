@@ -10,8 +10,8 @@ import {
   RefreshControl,
 } from "react-native";
 
-// 🔧 TODO: Hier später deine echte Backend-URL eintragen
-const API_BASE_URL = ""; // z.B. "https://dein-backend.de"
+// ✅ echte Backend-URL
+const API_BASE_URL = "https://tennis-booking-tau.vercel.app";
 
 function formatDateTimeDE(iso) {
   if (!iso) return "—";
@@ -101,7 +101,7 @@ export default function TeamDetailsScreen({ route, navigation }) {
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState("");
 
-  // Demo-Daten (solange kein Backend angeschlossen ist)
+  // Demo-Daten (Fallback)
   const demo = useMemo(
     () => ({
       team: teamTitle,
@@ -125,20 +125,6 @@ export default function TeamDetailsScreen({ route, navigation }) {
           opponent: "TC Beispielstadt",
           venue: "Tacherting Tennisanlage",
         },
-        {
-          id: "m3",
-          date: "2026-03-22T10:00:00.000Z",
-          home: false,
-          opponent: "SV Irgendwo",
-          venue: "Auswärts",
-        },
-        {
-          id: "m4",
-          date: "2026-04-05T09:00:00.000Z",
-          home: true,
-          opponent: "TSV Muster",
-          venue: "Tacherting Tennisanlage",
-        },
       ],
       table: [
         { rank: 1, club: "TEG Tacherting", played: 3, points: "6:0" },
@@ -153,17 +139,18 @@ export default function TeamDetailsScreen({ route, navigation }) {
   const fetchTeam = async () => {
     setError("");
     try {
-      // Wenn noch kein Backend: Demo anzeigen
-      if (!API_BASE_URL) {
-        setPayload(demo);
-        return;
-      }
-
-      const url = `${API_BASE_URL}/teams/${encodeURIComponent(teamId)}`;
+      // ✅ korrektes Endpoint-Format
+      const url = `${API_BASE_URL}/api/teams?teamId=${encodeURIComponent(teamId)}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      setPayload(json);
+
+      // ✅ wir wollen nur payload (table/matches/next_matches)
+      if (json?.ok && json?.payload) {
+        setPayload(json.payload);
+      } else {
+        throw new Error(json?.reason || "Keine Daten");
+      }
     } catch (e) {
       setError(e?.message || String(e));
       setPayload(demo); // fallback
@@ -185,9 +172,40 @@ export default function TeamDetailsScreen({ route, navigation }) {
     setRefreshing(false);
   };
 
-  const nextMatch = payload?.next_matches?.[0] || null;
-  const matches = payload?.matches || payload?.next_matches || [];
-  const table = payload?.table || [];
+  // -------- Mapping: Backend -> UI (damit Layout unverändert bleibt) --------
+  const apiMatches = payload?.matches || [];
+  const apiNext = payload?.next_matches || [];
+
+  const toIso = (datum, uhrzeit) => {
+    // datum "05.10.2025" -> "2025-10-05T15:00:00.000Z"
+    if (!datum) return null;
+    const parts = String(datum).split(".");
+    if (parts.length !== 3) return datum;
+    const isoDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+    const time = uhrzeit || "00:00";
+    return `${isoDate}T${time}:00.000Z`;
+  };
+
+  const mapMatch = (m) => {
+    const dateIso = toIso(m?.datum, m?.uhrzeit);
+    return {
+      id: `${m?.datum}-${m?.uhrzeit}-${m?.heim}-${m?.gast}-${m?.erg}`,
+      date: dateIso,
+      home: true, // optional später korrekt setzen
+      opponent: `${m?.heim || "—"} vs ${m?.gast || "—"} (${m?.erg || "—"})`,
+      venue: m?.halle || "—",
+    };
+  };
+
+  const nextMatch = apiNext[0] ? mapMatch(apiNext[0]) : null;
+  const matches = apiMatches.length ? apiMatches.map(mapMatch) : apiNext.map(mapMatch);
+
+  const table = (payload?.table || []).map((r) => ({
+    rank: r?.rang,
+    club: r?.mannschaft,
+    played: r?.begegnungen,
+    points: r?.punkte,
+  }));
 
   if (loading) {
     return (
@@ -245,7 +263,7 @@ export default function TeamDetailsScreen({ route, navigation }) {
           )}
 
           <Text style={styles.lastUpdated}>
-            Letztes Update: {formatDateTimeDE(payload?.last_updated)}
+            Letztes Update: {formatDateTimeDE(new Date().toISOString())}
           </Text>
 
           {/* Next match highlight */}
