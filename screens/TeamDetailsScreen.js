@@ -286,11 +286,12 @@ export default function TeamDetailsScreen({ route, navigation }) {
             <StatusBadge status={payload?.status} />
           </View>
 
-          {!!error && (
-            <Text style={styles.warningText}>
-              Hinweis: Live-Daten konnten nicht geladen werden ({error}). Demo-Daten werden angezeigt.
-            </Text>
-          )}
+{__DEV__ && !!error && (
+  <Text style={styles.warningText}>
+    Hinweis: Live-Daten konnten nicht geladen werden ({error}). Demo-Daten werden angezeigt.
+  </Text>
+)}
+
 
           <View style={styles.nextMatchCard}>
             <Text style={styles.sectionTitle}>Nächstes Spiel (TEG)</Text>
