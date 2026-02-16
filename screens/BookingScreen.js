@@ -256,31 +256,44 @@ useEffect(() => {
     }
   };
 
-  const insertMultipleBookingsToSupabase = async (
-    courtIndex,
-    times,
-    coPlayerName
-  ) => {
-    try {
-      const rows = times.map((t) => ({
-        court_index: courtIndex,
-        time: t,
-        date_key: currentDateKey,
-        user_name: userName,
-        player2: coPlayerName || null,
-      }));
-
-      const { error } = await supabase.from("bookings123").insert(rows);
-
-      if (error) {
-        console.log("Supabase insert error:", error.message);
-        Alert.alert("DB-Fehler (Insert)", error.message);
-      }
-    } catch (e) {
-      console.log("Supabase insert exception:", e);
-      Alert.alert("DB-Fehler (Exception)", String(e));
+const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName) => {
+  try {
+    // ✅ Session holen -> user_id
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) {
+      console.log("getSession error:", sessionError.message);
+      Alert.alert("Login-Fehler", "Session konnte nicht gelesen werden.");
+      return;
     }
-  };
+
+    const userId = sessionData?.session?.user?.id || null;
+
+    if (!userId) {
+      Alert.alert("Nicht eingeloggt", "Bitte neu einloggen, um zu buchen.");
+      return;
+    }
+
+    const rows = times.map((t) => ({
+      court_index: courtIndex,
+      time: t,
+      date_key: currentDateKey,
+      user_name: userName,
+      player2: coPlayerName || null,
+      user_id: userId, // ✅ NEU (WICHTIG für RLS)
+    }));
+
+    const { error } = await supabase.from("bookings123").insert(rows);
+
+    if (error) {
+      console.log("Supabase insert error:", error.message);
+      Alert.alert("DB-Fehler (Insert)", error.message);
+    }
+  } catch (e) {
+    console.log("Supabase insert exception:", e);
+    Alert.alert("DB-Fehler (Exception)", String(e));
+  }
+};
+
 
   // mögliche Endzeiten für Start-Slot berechnen
   const getAvailableEndTimesForStart = (courtIndex, startTime) => {
@@ -315,7 +328,7 @@ useEffect(() => {
     // 1) bestehende Buchung -> löschen
     if (existing) {
       if (existing.userName !== userName && !isAdmin) {
-        Alert.alert(
+        showMessage(
           "Nicht erlaubt",
           "Diesen Slot hat jemand anders reserviert. Nur Admins können fremde Buchungen ändern."
         );

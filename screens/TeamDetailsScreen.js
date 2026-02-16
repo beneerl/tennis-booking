@@ -9,9 +9,7 @@ import {
   ActivityIndicator,
   RefreshControl,
 } from "react-native";
-
-// ✅ Backend-URL
-const API_BASE_URL = "https://tennis-booking-tau.vercel.app";
+import { supabase } from "../supabaseClient";
 
 // ✅ Exakter Clubname wie in nuLiga/PDF (wichtig für Filter + Heim/Auswärts)
 const OUR_CLUB = "TeG Alzstadt";
@@ -26,7 +24,15 @@ const parseDEDateTime = (datum, uhrzeit) => {
   if (parts.length !== 3) return null;
   const [dd, mm, yyyy] = parts;
   const [hh, min] = String(uhrzeit || "00:00").split(":");
-  const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), 0, 0);
+  const d = new Date(
+    Number(yyyy),
+    Number(mm) - 1,
+    Number(dd),
+    Number(hh),
+    Number(min),
+    0,
+    0
+  );
   return Number.isNaN(d.getTime()) ? null : d;
 };
 
@@ -48,7 +54,6 @@ const involvesOurClub = (m) => {
 };
 
 const computeHomeFlagForOurClub = (m) => {
-  // Heim, wenn unser Verein links steht (auch wenn Halle neutral ist)
   const heim = stripClubId(m?.heim).toLowerCase();
   return heim.includes(OUR_CLUB.toLowerCase());
 };
@@ -58,8 +63,8 @@ const mapMatch = (m) => {
   return {
     id: `${m?.datum}-${m?.uhrzeit}-${m?.heim}-${m?.gast}`,
     date: d ? d.toISOString() : null,
-    dateObj: d, // intern
-    time: String(m?.uhrzeit || "").trim(), // ✅ Uhrzeit fürs UI
+    dateObj: d,
+    time: String(m?.uhrzeit || "").trim(),
     venue: m?.halle || "—",
     erg: String(m?.erg || "").trim(),
     heim: stripClubId(m?.heim),
@@ -67,8 +72,10 @@ const mapMatch = (m) => {
   };
 };
 
-const sortByDateAsc = (a, b) => (a?.dateObj?.getTime?.() ?? 0) - (b?.dateObj?.getTime?.() ?? 0);
-const sortByDateDesc = (a, b) => (b?.dateObj?.getTime?.() ?? 0) - (a?.dateObj?.getTime?.() ?? 0);
+const sortByDateAsc = (a, b) =>
+  (a?.dateObj?.getTime?.() ?? 0) - (b?.dateObj?.getTime?.() ?? 0);
+const sortByDateDesc = (a, b) =>
+  (b?.dateObj?.getTime?.() ?? 0) - (a?.dateObj?.getTime?.() ?? 0);
 
 const splitMatches = (all) => {
   const now = new Date();
@@ -83,7 +90,6 @@ const splitMatches = (all) => {
       continue;
     }
 
-    // Ohne Ergebnis -> Datum entscheidet
     if (m.dateObj >= now) upcoming.push(m);
     else played.push(m);
   }
@@ -152,7 +158,10 @@ function TabButton({ label, active, onPress }) {
 export default function TeamDetailsScreen({ route, navigation }) {
   const teamId = route?.params?.teamId || "unknown";
   const teamTitle =
-    route?.params?.teamTitle || route?.params?.label || route?.params?.team || "Team";
+    route?.params?.teamTitle ||
+    route?.params?.label ||
+    route?.params?.team ||
+    "Team";
 
   const [tab, setTab] = useState("teg"); // teg | table | liga
   const [loading, setLoading] = useState(true);
@@ -161,15 +170,17 @@ export default function TeamDetailsScreen({ route, navigation }) {
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState("");
 
-  // Fallback Demo (nur wenn API down ist)
+  // Fallback Demo
   const demo = useMemo(
     () => ({
       team: teamTitle,
-      season: "Winter 2025/2026",
-      status: "ACTIVE",
+      season: "—",
+      status: "PENDING",
       matches: [],
       next_matches: [],
       table: [],
+      source_url: "",
+      updated_at: null,
     }),
     [teamTitle]
   );
@@ -177,16 +188,24 @@ export default function TeamDetailsScreen({ route, navigation }) {
   const fetchTeam = async () => {
     setError("");
     try {
-      const url = `${API_BASE_URL}/api/teams?teamId=${encodeURIComponent(teamId)}`;
-      const res = await fetch(url);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const { data, error: dbErr } = await supabase
+        .from("team_cache")
+        .select("team_id, payload_json, status, source_url, updated_at")
+        .eq("team_id", teamId)
+        .maybeSingle();
 
-      if (json?.ok && json?.payload) {
-        setPayload(json.payload);
-      } else {
-        throw new Error(json?.reason || "Keine Daten");
-      }
+      if (dbErr) throw dbErr;
+      if (!data) throw new Error("Keine Teamdaten in team_cache gefunden.");
+
+      // payload_json enthält euer komplettes Objekt (matches, table, season, ...)
+      const p = data.payload_json || {};
+
+      setPayload({
+        ...p,
+        status: data.status || p.status || "—",
+        source_url: data.source_url || p.source_url || "",
+        updated_at: data.updated_at || p.updated_at || null,
+      });
     } catch (e) {
       setError(e?.message || String(e));
       setPayload(demo);
@@ -210,7 +229,6 @@ export default function TeamDetailsScreen({ route, navigation }) {
 
   // ======= UI-Daten aus payload bauen =======
 
-  // Tabelle normalisieren
   const table = (payload?.table || []).map((r) => ({
     rank: Number(r?.rang ?? 0) || 0,
     club: stripClubId(r?.mannschaft),
@@ -218,11 +236,9 @@ export default function TeamDetailsScreen({ route, navigation }) {
     points: r?.punkte || "—",
   }));
 
-  // Matches normalisieren
   const rawMatches = payload?.matches || [];
   const allMatches = rawMatches.map(mapMatch).filter((m) => m.dateObj);
 
-  // TEG = nur unsere Spiele
   const ourMatchesRaw = allMatches
     .filter(involvesOurClub)
     .map((m) => ({ ...m, home: computeHomeFlagForOurClub(m) }));
@@ -230,11 +246,9 @@ export default function TeamDetailsScreen({ route, navigation }) {
   const { upcoming: ourUpcoming, played: ourPlayed } = splitMatches(ourMatchesRaw);
   const tegList = [...ourUpcoming, ...ourPlayed];
 
-  // Liga = alle Spiele
   const { upcoming: ligaUpcoming, played: ligaPlayed } = splitMatches(allMatches);
   const ligaList = [...ligaUpcoming, ...ligaPlayed];
 
-  // Hero Next Match: nur TEG
   const nextMatch = ourUpcoming[0] || null;
 
   if (loading) {
@@ -286,12 +300,11 @@ export default function TeamDetailsScreen({ route, navigation }) {
             <StatusBadge status={payload?.status} />
           </View>
 
-{__DEV__ && !!error && (
-  <Text style={styles.warningText}>
-    Hinweis: Live-Daten konnten nicht geladen werden ({error}). Demo-Daten werden angezeigt.
-  </Text>
-)}
-
+          {__DEV__ && !!error && (
+            <Text style={styles.warningText}>
+              Hinweis: Live-Daten konnten nicht geladen werden ({error}). Demo-Daten werden angezeigt.
+            </Text>
+          )}
 
           <View style={styles.nextMatchCard}>
             <Text style={styles.sectionTitle}>Nächstes Spiel (TEG)</Text>
@@ -560,7 +573,6 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { color: "#ffffff", fontSize: 14, fontWeight: "900", marginBottom: 8 },
   bigLine: { color: "#c3d0ea", fontSize: 13, marginBottom: 6 },
-  smallLine: { color: "#9fb0c8", marginTop: 6 },
 
   tabsRow: {
     marginTop: 12,
@@ -599,11 +611,10 @@ const styles = StyleSheet.create({
     borderColor: "#355a8a",
   },
 
- matchCardUpcoming: {
-  borderColor: "#f28b25",
-  borderWidth: 2,
-},
-
+  matchCardUpcoming: {
+    borderColor: "#f28b25",
+    borderWidth: 2,
+  },
 
   matchCardPlayed: {
     borderColor: "rgba(255,255,255,0.18)",
@@ -635,12 +646,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "900",
   },
-teamLineHero: {
-  color: "#ffffff",
-  fontSize: 18,      // <- größer als normal
-  lineHeight: 22,
-  fontWeight: "900",
-},
+  teamLineHero: {
+    color: "#ffffff",
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: "900",
+  },
 
   scoreBox: {
     minWidth: 56,

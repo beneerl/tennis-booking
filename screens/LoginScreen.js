@@ -65,13 +65,24 @@ export default function LoginScreen({ navigation }) {
           ? String(sessionData.session.user.email).toLowerCase()
           : null;
 
-        // 2) Fallback: AsyncStorage
-        const json = await AsyncStorage.getItem("user_login");
-        const stored = json ? JSON.parse(json) : null;
-        const storedEmail = stored?.email ? String(stored.email).toLowerCase() : null;
+// 2) AsyncStorage ist der "Schalter" für Auto-Login
+const json = await AsyncStorage.getItem("user_login");
+const stored = json ? JSON.parse(json) : null;
+const storedEmail = stored?.email ? String(stored.email).toLowerCase() : null;
 
-        const emailToCheck = sessionEmail || storedEmail;
-        if (!emailToCheck) return;
+// Wenn kein user_login gespeichert ist -> KEIN Auto-Login (wichtig für Logout auf Web)
+if (!storedEmail) return;
+
+// Optional: Wenn Session fehlt, bleib im Login
+// (Wenn du willst, dass Auto-Login nur mit Session geht, lass diese 3 Zeilen drin)
+if (!sessionEmail) {
+  await AsyncStorage.removeItem("user_login");
+  return;
+}
+
+// Wir prüfen den User anhand der gespeicherten Email (nicht anhand sessionEmail)
+const emailToCheck = storedEmail;
+
 
         // 3) User in DB laden + Status checken
         const u = await loadUserByEmail(emailToCheck);
@@ -255,6 +266,22 @@ export default function LoginScreen({ navigation }) {
                 // Nicht hart abbrechen – Login kann trotzdem funktionieren
               }
             }
+// ✅ WICHTIG: Nach signUp (Migration) ist oft KEINE Session vorhanden.
+// Deshalb sofort sicher einloggen, sonst ist auth.uid() leer -> user_id bleibt NULL.
+const { error: signInAfterSignUpErr } = await supabase.auth.signInWithPassword({
+  email: trimmedEmail,
+  password: trimmedPin,
+});
+
+if (signInAfterSignUpErr) {
+  console.log("signInAfterSignUpErr:", signInAfterSignUpErr.message);
+  showMessage(
+    "Login fehlgeschlagen",
+    "Bitte nochmal einloggen: " + signInAfterSignUpErr.message
+  );
+  setLoading(false);
+  return;
+}
 
             // 4) Jetzt Status prüfen + rein
             await doStatusAndGo(existingUser);
@@ -442,7 +469,7 @@ const styles = StyleSheet.create({
     color: "#ffffff",
     borderWidth: 1,
     borderColor: "#355a8a",
-    fontSize: 14,
+    fontSize: 16,
   },
   loginButton: {
     marginTop: 16,
