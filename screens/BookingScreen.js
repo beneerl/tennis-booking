@@ -491,7 +491,8 @@ useEffect(() => {
 {/* ✅ Neuer Reiter: LK */}
 <TouchableOpacity
   style={styles.lkBtn}
-  onPress={() => navigation.navigate("LK")}
+  onPress={() => navigation.navigate("LK", { userName, isAdmin })}
+
 >
   <Text style={styles.lkIcon}>📈</Text>
 </TouchableOpacity>

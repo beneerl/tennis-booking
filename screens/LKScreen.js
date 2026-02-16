@@ -9,9 +9,12 @@ import {
   ScrollView,
   Switch,
   StatusBar,
+  RefreshControl,
+  ActivityIndicator,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
+import { supabase } from "../supabaseClient";
 
 const STORAGE_PROFILE = "lk_profile_v1";
 const STORAGE_HISTORY = "lk_history_v1";
@@ -23,10 +26,7 @@ const toNumber = (v) => {
 };
 
 const round3 = (n) => Math.round(n * 1000) / 1000;
-
-// LK grob begrenzen (DTB LK-System geht typ. 1..25)
 const clampLK = (n) => Math.max(1, Math.min(25, n));
-
 const uid = () => `${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
 const weeksBetween = (isoA, isoB) => {
@@ -41,17 +41,14 @@ const weeksBetween = (isoA, isoB) => {
 const fmt = (n) => String(n ?? "").replace(".", ",");
 
 // ===== BTV/DTB LK-Berechnung (Anhänge A.1–A.4) =====
-
-// A.1 Punktefunktion P (d = Sieger-LK - Verlierer-LK)
 const calcP = (d) => {
   if (d <= -4) return 10;
   if (d > -4 && d <= -2) return 1.25 * d ** 3 + 15 * d ** 2 + 60 * d + 90;
   if (d > -2 && d <= 4) return 15 * d + 50;
   if (d > 4 && d <= 6) return -3.75 * d ** 2 + 45 * d - 10;
-  return 125; // d > 6
+  return 125;
 };
 
-// A.2 Hürde H (abhängig von Sieger-LK)
 const calcH = (lkWinner) => {
   if (lkWinner >= 10) return 10 * (30 - lkWinner);
   return (
@@ -60,8 +57,6 @@ const calcH = (lkWinner) => {
   );
 };
 
-// A.3 Altersklassenfaktor A – für Herren (m)
-// Für euch i. d. R. "Offene Klasse" => 100%
 const A_TABLE_M = {
   10: 25,
   11: 30,
@@ -90,11 +85,8 @@ const A_TABLE_M = {
 };
 
 const calcA = (ageClass = "Offene Klasse") => (A_TABLE_M[ageClass] ?? 100) / 100;
-
-// A.4 Zählweisenfaktor Z – Standard: 100%, Kurzsatz: 75%
 const calcZ = (format = "standard") => (format === "short" ? 0.75 : 1.0);
 
-// LK-Verbesserung für Sieger (Einzel): (P/H) * A * Z
 const calcImprovementSingle = ({
   winnerLK,
   loserLK,
@@ -109,7 +101,6 @@ const calcImprovementSingle = ({
   return (P / H) * A * Z;
 };
 
-// Doppelregel: mit arithm. Mitteln; Ergebnis zu 50% auf beide Sieger verteilt
 const calcImprovementDoubleForOneWinner = ({
   winnerLK,
   winnerPartnerLK,
@@ -129,29 +120,83 @@ const calcImprovementDoubleForOneWinner = ({
   return base * 0.5;
 };
 
-export default function LKScreen() {
+export default function LKScreen({ route }) {
   const navigation = useNavigation();
+  const userName = route?.params?.userName || "Gast";
+
   const [loading, setLoading] = useState(true);
+
+  // Tabs
+  const [tab, setTab] = useState("calc"); // calc | board
 
   // Profil
   const [currentLK, setCurrentLK] = useState(16.0);
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [useMotivation, setUseMotivation] = useState(false);
 
-  // Damit Komma-Eingabe sauber funktioniert (z.B. "20," beim Tippen)
+  // Komma-Eingabe sauber
   const [currentLKText, setCurrentLKText] = useState("16,0");
+
+  // Rangliste
+  const [optIn, setOptIn] = useState(false);
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [lbLoading, setLbLoading] = useState(false);
+  const [lbRefreshing, setLbRefreshing] = useState(false);
 
   // Formular
   const [opponentLK, setOpponentLK] = useState("");
-  const [type, setType] = useState("single"); // single | double
-  const [result, setResult] = useState("W"); // W | L
-
-  // Doppel optional
+  const [type, setType] = useState("single");
+  const [result, setResult] = useState("W");
   const [partnerLK, setPartnerLK] = useState("");
   const [opponentPartnerLK, setOpponentPartnerLK] = useState("");
 
   // Verlauf
   const [history, setHistory] = useState([]);
+
+  const saveProfileLocal = async (next) => {
+    await AsyncStorage.setItem(STORAGE_PROFILE, JSON.stringify(next));
+  };
+  const saveHistory = async (next) => {
+    await AsyncStorage.setItem(STORAGE_HISTORY, JSON.stringify(next));
+  };
+
+  const upsertProfile = async (lkValue) => {
+    try {
+      if (!userName || userName === "Gast") return;
+      const { error } = await supabase
+        .from("lk_profiles")
+        .upsert(
+          {
+            display_name: userName,
+            lk_current: lkValue,
+            leaderboard_opt_in: !!optIn,
+            updated_at: new Date().toISOString(),
+          },
+          { onConflict: "display_name" }
+        );
+      if (error) console.log("lk_profiles upsert error:", error.message);
+    } catch (e) {
+      console.log("lk_profiles upsert exception:", String(e));
+    }
+  };
+
+  const loadLeaderboard = async () => {
+    setLbLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from("lk_profiles")
+        .select("display_name, lk_current, updated_at")
+        .eq("leaderboard_opt_in", true)
+        .order("lk_current", { ascending: true });
+
+      if (error) console.log("leaderboard error:", error.message);
+      setLeaderboard(data || []);
+    } catch (e) {
+      console.log("leaderboard exception:", String(e));
+    } finally {
+      setLbLoading(false);
+    }
+  };
 
   const load = async () => {
     try {
@@ -163,6 +208,7 @@ export default function LKScreen() {
         if (typeof p?.currentLK === "number") setCurrentLK(p.currentLK);
         if (typeof p?.autoUpdate === "boolean") setAutoUpdate(p.autoUpdate);
         if (typeof p?.useMotivation === "boolean") setUseMotivation(p.useMotivation);
+        if (typeof p?.optIn === "boolean") setOptIn(p.optIn);
       }
       if (hRaw) {
         const h = JSON.parse(hRaw);
@@ -172,27 +218,39 @@ export default function LKScreen() {
     setLoading(false);
   };
 
-  const saveProfile = async (next) => {
-    await AsyncStorage.setItem(STORAGE_PROFILE, JSON.stringify(next));
-  };
-  const saveHistory = async (next) => {
-    await AsyncStorage.setItem(STORAGE_HISTORY, JSON.stringify(next));
-  };
-
   useEffect(() => {
     load();
   }, []);
 
-  // wenn currentLK geladen/gesetzt wird, Input-Text synchron halten
   useEffect(() => {
+    if (loading) return;
     setCurrentLKText(fmt(round3(toNumber(currentLK) ?? 0)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
   useEffect(() => {
     if (loading) return;
-    saveProfile({ currentLK, autoUpdate, useMotivation });
-  }, [currentLK, autoUpdate, useMotivation, loading]);
+    saveProfileLocal({ currentLK, autoUpdate, useMotivation, optIn });
+  }, [currentLK, autoUpdate, useMotivation, optIn, loading]);
+
+  useEffect(() => {
+    if (!loading) loadLeaderboard();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
+
+  // Opt-in geändert => Profil einmal hochschreiben
+  useEffect(() => {
+    if (loading) return;
+    const n = toNumber(currentLK);
+    if (n != null) upsertProfile(n);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [optIn]);
+
+  const onRefreshLeaderboard = async () => {
+    setLbRefreshing(true);
+    await loadLeaderboard();
+    setLbRefreshing(false);
+  };
 
   const onAddMatch = async () => {
     const own = toNumber(currentLK);
@@ -202,7 +260,6 @@ export default function LKScreen() {
     const nowIso = new Date().toISOString();
     const lastIso = history?.[0]?.date || null;
 
-    // optional Motivationsaufschlag: +0,025 je volle Woche seit letztem Eintrag (bis LK 25)
     let lkBefore = own;
     let motivationApplied = 0;
 
@@ -217,7 +274,6 @@ export default function LKScreen() {
     let delta = 0;
     let lkAfter = lkBefore;
 
-    // Punktspiel-Bonus +10% (bei euch: immer Punktspiel)
     const TEAM_BONUS = 1.1;
 
     if (result === "W") {
@@ -230,7 +286,6 @@ export default function LKScreen() {
         });
         delta = base * TEAM_BONUS;
       } else {
-        // Doppel: Partner LK optional, Gegner-Partner optional
         const pLK = toNumber(partnerLK) ?? lkBefore;
         const oppPLK = toNumber(opponentPartnerLK) ?? opp;
 
@@ -246,9 +301,8 @@ export default function LKScreen() {
       }
 
       delta = round3(Math.max(0, delta));
-      lkAfter = clampLK(round3(lkBefore - delta)); // Sieg => Zahl wird kleiner (besser)
+      lkAfter = clampLK(round3(lkBefore - delta));
     } else {
-      // Niederlage: Verlierer bleibt unberührt (delta = 0)
       delta = 0;
       lkAfter = lkBefore;
     }
@@ -274,6 +328,8 @@ export default function LKScreen() {
     if (autoUpdate) {
       setCurrentLK(lkAfter);
       setCurrentLKText(fmt(lkAfter));
+      await upsertProfile(lkAfter);
+      await loadLeaderboard();
     }
 
     setOpponentLK("");
@@ -290,10 +346,22 @@ export default function LKScreen() {
     if (autoUpdate && latest?.lkBefore != null) {
       setCurrentLK(latest.lkBefore);
       setCurrentLKText(fmt(latest.lkBefore));
+      await upsertProfile(latest.lkBefore);
+      await loadLeaderboard();
     }
   };
 
   const headerLK = useMemo(() => round3(toNumber(currentLK) ?? 0), [currentLK]);
+
+  const TabButton = ({ label, active, onPress }) => (
+    <TouchableOpacity
+      onPress={onPress}
+      style={[styles.tabBtn, active && styles.tabBtnActive]}
+      activeOpacity={0.9}
+    >
+      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
+    </TouchableOpacity>
+  );
 
   if (loading) {
     return (
@@ -324,160 +392,220 @@ export default function LKScreen() {
         <View style={{ width: 70 }} />
       </View>
 
+      {/* Tabs */}
+      <View style={styles.tabsRow}>
+        <TabButton label="Rechner" active={tab === "calc"} onPress={() => setTab("calc")} />
+        <TabButton label="Rangliste" active={tab === "board"} onPress={() => setTab("board")} />
+      </View>
+
       <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Aktuelle LK</Text>
-          <TextInput
-            value={currentLKText}
-            onChangeText={(t) => {
-              const cleaned = String(t).replace(".", ",");
-              setCurrentLKText(cleaned);
-              const n = toNumber(cleaned);
-              if (n != null) setCurrentLK(n);
-            }}
-            keyboardType="numbers-and-punctuation"
-            style={styles.input}
-            placeholder="z.B. 16,3"
-            placeholderTextColor="#7f93b0"
-          />
-          <Text style={styles.bigLK}>{fmt(headerLK)}</Text>
-
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>LK nach Eintrag aktualisieren</Text>
-            <Switch value={autoUpdate} onValueChange={setAutoUpdate} />
-          </View>
-
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Motivationsaufschlag berücksichtigen</Text>
-            <Switch value={useMotivation} onValueChange={setUseMotivation} />
-          </View>
-
-          <Text style={styles.note}>
-            Motivation: +0,025 je voller Woche seit dem letzten Eintrag (bis LK 25).
-          </Text>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Match eintragen</Text>
-
-          <View style={styles.segRow}>
-            <TouchableOpacity
-              style={[styles.seg, type === "single" && styles.segActive]}
-              onPress={() => setType("single")}
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.segText, type === "single" && styles.segTextActive]}>
-                Einzel
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.seg, type === "double" && styles.segActive]}
-              onPress={() => setType("double")}
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.segText, type === "double" && styles.segTextActive]}>
-                Doppel
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.segRow}>
-            <TouchableOpacity
-              style={[styles.seg, result === "W" && styles.segActive]}
-              onPress={() => setResult("W")}
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.segText, result === "W" && styles.segTextActive]}>
-                Sieg
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.seg, result === "L" && styles.segActive]}
-              onPress={() => setResult("L")}
-              activeOpacity={0.9}
-            >
-              <Text style={[styles.segText, result === "L" && styles.segTextActive]}>
-                Niederlage
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Inputs: Einzel vs Doppel */}
-          {type === "double" ? (
-            <>
-              <Text style={styles.label}>Partner-LK</Text>
+        {tab === "calc" && (
+          <>
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Aktuelle LK</Text>
               <TextInput
-                value={partnerLK}
-                onChangeText={setPartnerLK}
+                value={currentLKText}
+                onChangeText={(t) => {
+                  const cleaned = String(t).replace(".", ",");
+                  setCurrentLKText(cleaned);
+                  const n = toNumber(cleaned);
+                  if (n != null) setCurrentLK(n);
+                }}
                 keyboardType="numbers-and-punctuation"
                 style={styles.input}
-                placeholder="z.B. 18,5"
+                placeholder="z.B. 16,3"
                 placeholderTextColor="#7f93b0"
               />
+              <Text style={styles.bigLK}>{fmt(headerLK)}</Text>
 
-              <Text style={styles.label}>Gegner-LK 1</Text>
-              <TextInput
-                value={opponentLK}
-                onChangeText={setOpponentLK}
-                keyboardType="numbers-and-punctuation"
-                style={styles.input}
-                placeholder="z.B. 14,8"
-                placeholderTextColor="#7f93b0"
-              />
-
-              <Text style={styles.label}>Gegner-LK 2</Text>
-              <TextInput
-                value={opponentPartnerLK}
-                onChangeText={setOpponentPartnerLK}
-                keyboardType="numbers-and-punctuation"
-                style={styles.input}
-                placeholder="z.B. 16,2"
-                placeholderTextColor="#7f93b0"
-              />
-            </>
-          ) : (
-            <>
-              <Text style={styles.label}>Gegner-LK</Text>
-              <TextInput
-                value={opponentLK}
-                onChangeText={setOpponentLK}
-                keyboardType="numbers-and-punctuation"
-                style={styles.input}
-                placeholder="z.B. 14,8"
-                placeholderTextColor="#7f93b0"
-              />
-            </>
-          )}
-
-          <TouchableOpacity style={styles.primaryBtn} onPress={onAddMatch} activeOpacity={0.9}>
-            <Text style={styles.primaryText}>Eintrag speichern</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.secondaryBtn} onPress={onUndo} activeOpacity={0.9}>
-            <Text style={styles.secondaryText}>Letzten Eintrag rückgängig</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Verlauf</Text>
-
-          {history.length === 0 ? (
-            <Text style={styles.muted}>Noch keine Einträge.</Text>
-          ) : (
-            history.map((h) => (
-              <View key={h.id} style={styles.historyRow}>
-                <Text style={styles.hMain}>
-                  {h.result === "W" ? "✅ Sieg" : "❌ Niederlage"} ·{" "}
-                  {h.type === "single" ? "Einzel" : "Doppel"} · Gegner {fmt(h.opponentLK)}
-                </Text>
-                <Text style={styles.hSub}>
-                  LK {fmt(h.lkBefore)} → {fmt(h.lkAfter)} · Δ {fmt(h.delta)}
-                  {h.motivationApplied ? ` · Motivation +${fmt(h.motivationApplied)}` : ""}
-                </Text>
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>LK nach Eintrag aktualisieren</Text>
+                <Switch value={autoUpdate} onValueChange={setAutoUpdate} />
               </View>
-            ))
-          )}
-        </View>
+
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>Motivationsaufschlag berücksichtigen</Text>
+                <Switch value={useMotivation} onValueChange={setUseMotivation} />
+              </View>
+
+              <View style={styles.row}>
+                <Text style={styles.rowLabel}>In Rangliste anzeigen</Text>
+                <Switch value={optIn} onValueChange={setOptIn} />
+              </View>
+
+              <Text style={styles.note}>
+                Motivation: +0,025 je voller Woche seit dem letzten Eintrag (bis LK 25).
+              </Text>
+              <Text style={styles.note}>Dein Name: {userName}</Text>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Match eintragen</Text>
+
+              <View style={styles.segRow}>
+                <TouchableOpacity
+                  style={[styles.seg, type === "single" && styles.segActive]}
+                  onPress={() => setType("single")}
+                  activeOpacity={0.9}
+                >
+                  <Text style={[styles.segText, type === "single" && styles.segTextActive]}>
+                    Einzel
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.seg, type === "double" && styles.segActive]}
+                  onPress={() => setType("double")}
+                  activeOpacity={0.9}
+                >
+                  <Text style={[styles.segText, type === "double" && styles.segTextActive]}>
+                    Doppel
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.segRow}>
+                <TouchableOpacity
+                  style={[styles.seg, result === "W" && styles.segActive]}
+                  onPress={() => setResult("W")}
+                  activeOpacity={0.9}
+                >
+                  <Text style={[styles.segText, result === "W" && styles.segTextActive]}>
+                    Sieg
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.seg, result === "L" && styles.segActive]}
+                  onPress={() => setResult("L")}
+                  activeOpacity={0.9}
+                >
+                  <Text style={[styles.segText, result === "L" && styles.segTextActive]}>
+                    Niederlage
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {type === "double" ? (
+                <>
+                  <Text style={styles.label}>Partner-LK</Text>
+                  <TextInput
+                    value={partnerLK}
+                    onChangeText={setPartnerLK}
+                    keyboardType="numbers-and-punctuation"
+                    style={styles.input}
+                    placeholder="z.B. 18,5"
+                    placeholderTextColor="#7f93b0"
+                  />
+
+                  <Text style={styles.label}>Gegner-LK 1</Text>
+                  <TextInput
+                    value={opponentLK}
+                    onChangeText={setOpponentLK}
+                    keyboardType="numbers-and-punctuation"
+                    style={styles.input}
+                    placeholder="z.B. 14,8"
+                    placeholderTextColor="#7f93b0"
+                  />
+
+                  <Text style={styles.label}>Gegner-LK 2</Text>
+                  <TextInput
+                    value={opponentPartnerLK}
+                    onChangeText={setOpponentPartnerLK}
+                    keyboardType="numbers-and-punctuation"
+                    style={styles.input}
+                    placeholder="z.B. 16,2"
+                    placeholderTextColor="#7f93b0"
+                  />
+                </>
+              ) : (
+                <>
+                  <Text style={styles.label}>Gegner-LK</Text>
+                  <TextInput
+                    value={opponentLK}
+                    onChangeText={setOpponentLK}
+                    keyboardType="numbers-and-punctuation"
+                    style={styles.input}
+                    placeholder="z.B. 14,8"
+                    placeholderTextColor="#7f93b0"
+                  />
+                </>
+              )}
+
+              <TouchableOpacity style={styles.primaryBtn} onPress={onAddMatch} activeOpacity={0.9}>
+                <Text style={styles.primaryText}>Eintrag speichern</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.secondaryBtn} onPress={onUndo} activeOpacity={0.9}>
+                <Text style={styles.secondaryText}>Letzten Eintrag rückgängig</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>Verlauf</Text>
+
+              {history.length === 0 ? (
+                <Text style={styles.muted}>Noch keine Einträge.</Text>
+              ) : (
+                history.map((h) => (
+                  <View key={h.id} style={styles.historyRow}>
+                    <Text style={styles.hMain}>
+                      {h.result === "W" ? "✅ Sieg" : "❌ Niederlage"} ·{" "}
+                      {h.type === "single" ? "Einzel" : "Doppel"} · Gegner {fmt(h.opponentLK)}
+                    </Text>
+                    <Text style={styles.hSub}>
+                      LK {fmt(h.lkBefore)} → {fmt(h.lkAfter)} · Δ {fmt(h.delta)}
+                      {h.motivationApplied ? ` · Motivation +${fmt(h.motivationApplied)}` : ""}
+                    </Text>
+                  </View>
+                ))
+              )}
+            </View>
+          </>
+        )}
+
+        {tab === "board" && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Rangliste</Text>
+
+            {lbLoading ? (
+              <View style={{ paddingVertical: 12 }}>
+                <ActivityIndicator color="#ffffff" />
+                <Text style={styles.muted}>Lade Rangliste…</Text>
+              </View>
+            ) : (
+              <ScrollView
+                style={{ maxHeight: 520 }}
+                refreshControl={
+                  <RefreshControl
+                    refreshing={lbRefreshing}
+                    onRefresh={onRefreshLeaderboard}
+                    tintColor="#fff"
+                  />
+                }
+              >
+                {leaderboard.length === 0 ? (
+                  <Text style={styles.muted}>
+                    Noch keine Einträge. Aktiviere „In Rangliste anzeigen“ und speichere einen Eintrag.
+                  </Text>
+                ) : (
+                  leaderboard.map((p, idx) => (
+                    <View key={`${p.display_name}-${idx}`} style={styles.boardRow}>
+                      <Text style={styles.boardRank}>#{idx + 1}</Text>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.boardName} numberOfLines={1}>
+                          {p.display_name}
+                        </Text>
+                        <Text style={styles.boardMeta}>
+                          zuletzt: {p.updated_at ? new Date(p.updated_at).toLocaleDateString("de-DE") : "—"}
+                        </Text>
+                      </View>
+                      <Text style={styles.boardLK}>{fmt(round3(p.lk_current))}</Text>
+                    </View>
+                  ))
+                )}
+              </ScrollView>
+            )}
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -495,6 +623,20 @@ const styles = StyleSheet.create({
   backBtn: { paddingVertical: 8, paddingRight: 12 },
   backText: { color: "#f28b25", fontSize: 14, fontWeight: "700" },
   headerTitle: { color: "#ffffff", fontSize: 18, fontWeight: "900", flex: 1, textAlign: "center" },
+
+  tabsRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
+  tabBtn: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#355a8a",
+    paddingVertical: 10,
+    alignItems: "center",
+    backgroundColor: "rgba(8, 35, 80, 0.55)",
+  },
+  tabBtnActive: { backgroundColor: "#f28b25", borderColor: "#f28b25" },
+  tabText: { color: "#ffffff", fontSize: 13, fontWeight: "900" },
+  tabTextActive: { color: "#001738" },
 
   card: {
     backgroundColor: "#022449",
@@ -561,4 +703,17 @@ const styles = StyleSheet.create({
   historyRow: { paddingVertical: 10, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.08)" },
   hMain: { color: "#fff", fontWeight: "900", fontSize: 12 },
   hSub: { color: "#9fb0c8", marginTop: 4, fontSize: 12, fontWeight: "800" },
+
+  boardRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.08)",
+  },
+  boardRank: { width: 36, color: "#9fb0c8", fontWeight: "900" },
+  boardName: { color: "#ffffff", fontWeight: "900" },
+  boardMeta: { color: "#9fb0c8", marginTop: 2, fontSize: 11, fontWeight: "800" },
+  boardLK: { color: "#f28b25", fontWeight: "900", fontSize: 14 },
 });
