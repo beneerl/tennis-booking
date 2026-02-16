@@ -9,6 +9,7 @@ import AdminSettingsScreen from "./screens/AdminSettingsScreen";
 import ProfileScreen from "./screens/ProfileScreen";
 import TeamsScreen from "./screens/TeamsScreen";
 import TeamDetailsScreen from "./screens/TeamDetailsScreen";
+import LKScreen from "./screens/LKScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -26,8 +27,10 @@ config: {
     Profile: "profile",
     Teams: "teams",
     TeamDetails: "teams/:teamId",
+    LK: "lk",
   },
 },
+
 
 };
 
@@ -50,6 +53,8 @@ export default function App() {
         <Stack.Screen name="Profile" component={ProfileScreen} />
         <Stack.Screen name="Teams" component={TeamsScreen} />
         <Stack.Screen name="TeamDetails" component={TeamDetailsScreen} />
+        <Stack.Screen name="LK" component={LKScreen} />
+        
       </Stack.Navigator>
     </NavigationContainer>
   );

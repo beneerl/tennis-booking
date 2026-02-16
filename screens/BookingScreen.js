@@ -475,18 +475,29 @@ useEffect(() => {
       </TouchableOpacity>
     )}
 
-    {/* ✅ Neuer Reiter: Teams/Liga */}
-    <TouchableOpacity
-      style={styles.teamsBtn}
-      onPress={() =>
-        navigation.navigate("Teams", {
-          userName,
-          isAdmin,
-        })
-      }
-    >
-      <Text style={styles.teamsIcon}>🎾</Text>
-    </TouchableOpacity>
+{/* ✅ Neuer Reiter: Teams/Liga */}
+<TouchableOpacity
+  style={styles.teamsBtn}
+  onPress={() =>
+    navigation.navigate("Teams", {
+      userName,
+      isAdmin,
+    })
+  }
+>
+  <Text style={styles.teamsIcon}>🎾</Text>
+</TouchableOpacity>
+
+{/* ✅ Neuer Reiter: LK */}
+<TouchableOpacity
+  style={styles.lkBtn}
+  onPress={() => navigation.navigate("LK")}
+>
+  <Text style={styles.lkIcon}>📈</Text>
+</TouchableOpacity>
+
+
+
 
     <TouchableOpacity
       style={styles.profileBtn}
@@ -691,6 +702,18 @@ const styles = StyleSheet.create({
   borderColor: "#355a8a",
   backgroundColor: "#022449",
 },
+lkBtn: {
+  paddingVertical: 5,
+  paddingHorizontal: 10,
+  borderRadius: 999,
+  borderWidth: 1,
+  borderColor: "#355a8a",
+  backgroundColor: "#022449",
+},
+lkIcon: {
+  fontSize: 16,
+},
+
 teamsIcon: {
   fontSize: 16,
 },
