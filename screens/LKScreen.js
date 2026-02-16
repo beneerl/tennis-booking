@@ -137,6 +137,9 @@ export default function LKScreen({ route }) {
   // Komma-Eingabe sauber
   const [currentLKText, setCurrentLKText] = useState("16,0");
 
+  // ✅ Auth UserId (für eindeutigen Upsert)
+  const [userId, setUserId] = useState(null);
+
   // Rangliste
   const [optIn, setOptIn] = useState(false);
   const [leaderboard, setLeaderboard] = useState([]);
@@ -172,20 +175,24 @@ export default function LKScreen({ route }) {
     await AsyncStorage.setItem(STORAGE_HISTORY, JSON.stringify(next));
   };
 
+  // ✅ Upsert immer per user_id (nicht display_name), damit Rangliste sofort korrekt ist
   const upsertProfile = async (lkValue) => {
     try {
-      if (!userName || userName === "Gast") return;
+      if (!userId) return; // nicht eingeloggt / keine session
+
       const { error } = await supabase
         .from("lk_profiles")
         .upsert(
           {
+            user_id: userId,
             display_name: userName,
             lk_current: lkValue,
             leaderboard_opt_in: !!optIn,
             updated_at: new Date().toISOString(),
           },
-          { onConflict: "display_name" }
+          { onConflict: "user_id" }
         );
+
       if (error) console.log("lk_profiles upsert error:", error.message);
     } catch (e) {
       console.log("lk_profiles upsert exception:", String(e));
@@ -197,7 +204,7 @@ export default function LKScreen({ route }) {
     try {
       const { data, error } = await supabase
         .from("lk_profiles")
-        .select("display_name, lk_current, updated_at")
+        .select("user_id, display_name, lk_current, updated_at")
         .eq("leaderboard_opt_in", true)
         .order("lk_current", { ascending: true });
 
@@ -208,6 +215,21 @@ export default function LKScreen({ route }) {
     } finally {
       setLbLoading(false);
     }
+  };
+
+  // ✅ Zentrale Funktion: erst eigene LK (aus Textfeld!) hochschreiben, dann Rangliste neu laden
+  const syncMyLKThenReload = async () => {
+    const nFromText = toNumber(currentLKText);
+
+    // state optional sauber halten
+    if (nFromText != null) setCurrentLK(nFromText);
+
+    // upsert nur wenn opt-in (sonst ist es ok, nur load zu machen)
+    if (optIn && nFromText != null) {
+      await upsertProfile(nFromText);
+    }
+
+    await loadLeaderboard();
   };
 
   const load = async () => {
@@ -225,6 +247,14 @@ export default function LKScreen({ route }) {
       if (hRaw) {
         const h = JSON.parse(hRaw);
         if (Array.isArray(h)) setHistory(h);
+      }
+
+      // ✅ userId holen (für eindeutigen Upsert)
+      try {
+        const { data } = await supabase.auth.getUser();
+        setUserId(data?.user?.id || null);
+      } catch {
+        setUserId(null);
       }
     } catch {}
     setLoading(false);
@@ -250,17 +280,26 @@ export default function LKScreen({ route }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
-  // Opt-in geändert => Profil einmal hochschreiben
+  // ✅ Opt-in geändert => Profil einmal hochschreiben (mit aktueller LK aus Textfeld)
   useEffect(() => {
     if (loading) return;
-    const n = toNumber(currentLK);
-    if (n != null) upsertProfile(n);
+    const n = toNumber(currentLKText);
+    if (optIn && n != null) upsertProfile(n);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [optIn]);
+  }, [optIn, userId]);
+
+  // ✅ Beim Wechsel auf Rangliste automatisch syncen (macht’s „flüssiger“)
+  useEffect(() => {
+    if (loading) return;
+    if (tab === "board") {
+      syncMyLKThenReload();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, loading]);
 
   const onRefreshLeaderboard = async () => {
     setLbRefreshing(true);
-    await loadLeaderboard();
+    await syncMyLKThenReload();
     setLbRefreshing(false);
   };
 
@@ -341,7 +380,9 @@ export default function LKScreen({ route }) {
     if (autoUpdate) {
       setCurrentLK(lkAfter);
       setCurrentLKText(fmt(lkAfter));
-      await upsertProfile(lkAfter);
+
+      // ✅ Profil + Rangliste aktualisieren
+      if (optIn) await upsertProfile(lkAfter);
       await loadLeaderboard();
     }
 
@@ -359,7 +400,8 @@ export default function LKScreen({ route }) {
     if (autoUpdate && latest?.lkBefore != null) {
       setCurrentLK(latest.lkBefore);
       setCurrentLKText(fmt(latest.lkBefore));
-      await upsertProfile(latest.lkBefore);
+
+      if (optIn) await upsertProfile(latest.lkBefore);
       await loadLeaderboard();
     }
   };
@@ -512,11 +554,11 @@ export default function LKScreen({ route }) {
                   {/* ✅ Nur hier: Partner aus Rangliste wählen */}
                   <TouchableOpacity
                     style={styles.pickBtn}
-                    onPress={() => {
+                    onPress={async () => {
                       setSearch("");
                       setPickerOpen(true);
-                      // sicherstellen, dass Rangliste frisch ist
-                      loadLeaderboard();
+                      // ✅ sicherstellen, dass Rangliste frisch ist (inkl. eigener LK)
+                      await syncMyLKThenReload();
                     }}
                     activeOpacity={0.9}
                   >
@@ -594,18 +636,13 @@ export default function LKScreen({ route }) {
             <View style={styles.boardHeaderRow}>
               <Text style={styles.cardTitle}>Rangliste</Text>
 
-<TouchableOpacity
-  onPress={async () => {
-    const n = toNumber(currentLK);
-    if (optIn && n != null) await upsertProfile(n);   // ✅ erst hochschreiben
-    await loadLeaderboard();                          // ✅ dann neu laden
-  }}
-  style={styles.refreshBtn}
-  activeOpacity={0.9}
->
-  <Text style={styles.refreshText}>↻</Text>
-</TouchableOpacity>
-
+              <TouchableOpacity
+                onPress={syncMyLKThenReload}
+                style={styles.refreshBtn}
+                activeOpacity={0.9}
+              >
+                <Text style={styles.refreshText}>↻</Text>
+              </TouchableOpacity>
             </View>
 
             {lbLoading ? (
@@ -630,7 +667,7 @@ export default function LKScreen({ route }) {
                   </Text>
                 ) : (
                   leaderboard.map((p, idx) => (
-                    <View key={`${p.display_name}-${idx}`} style={styles.boardRow}>
+                    <View key={`${p.user_id || p.display_name}-${idx}`} style={styles.boardRow}>
                       <Text style={styles.boardRank}>#{idx + 1}</Text>
                       <View style={{ flex: 1 }}>
                         <Text style={styles.boardName} numberOfLines={1}>
@@ -638,7 +675,9 @@ export default function LKScreen({ route }) {
                         </Text>
                         <Text style={styles.boardMeta}>
                           zuletzt:{" "}
-                          {p.updated_at ? new Date(p.updated_at).toLocaleDateString("de-DE") : "—"}
+                          {p.updated_at
+                            ? new Date(p.updated_at).toLocaleDateString("de-DE")
+                            : "—"}
                         </Text>
                       </View>
                       <Text style={styles.boardLK}>{fmt(round3(p.lk_current))}</Text>
@@ -657,7 +696,11 @@ export default function LKScreen({ route }) {
           <View style={styles.modalBox}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Partner auswählen</Text>
-              <TouchableOpacity onPress={() => setPickerOpen(false)} style={styles.modalClose} activeOpacity={0.9}>
+              <TouchableOpacity
+                onPress={() => setPickerOpen(false)}
+                style={styles.modalClose}
+                activeOpacity={0.9}
+              >
                 <Text style={styles.modalCloseText}>✕</Text>
               </TouchableOpacity>
             </View>
@@ -676,7 +719,7 @@ export default function LKScreen({ route }) {
               ) : (
                 filteredLeaderboard.map((p, idx) => (
                   <TouchableOpacity
-                    key={`${p.display_name}-${idx}`}
+                    key={`${p.user_id || p.display_name}-${idx}`}
                     style={styles.pickerRow}
                     onPress={() => {
                       // ✅ setzt Partner-LK (nur Partner!)
