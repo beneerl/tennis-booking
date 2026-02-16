@@ -10,25 +10,39 @@ import {
   RefreshControl,
 } from "react-native";
 
-// ✅ echte Backend-URL
+// ✅ Backend-URL
 const API_BASE_URL = "https://tennis-booking-tau.vercel.app";
+
+// ✅ Exakter Clubname wie in nuLiga/PDF (wichtig für Filter + Heim/Auswärts)
 const OUR_CLUB = "TeG Alzstadt";
 
+// ---------- Helpers ----------
 const stripClubId = (s) => String(s || "").replace(/\s*\(\d+\)\s*$/, "").trim();
 
 const parseDEDateTime = (datum, uhrzeit) => {
+  // datum: "15.03.2026", uhrzeit: "15:00"
   if (!datum) return null;
-  const [dd, mm, yyyy] = String(datum).split(".");
+  const parts = String(datum).split(".");
+  if (parts.length !== 3) return null;
+  const [dd, mm, yyyy] = parts;
   const [hh, min] = String(uhrzeit || "00:00").split(":");
   const d = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(min), 0, 0);
-  return isNaN(d.getTime()) ? null : d;
+  return Number.isNaN(d.getTime()) ? null : d;
 };
 
 const isPlayed = (m) => String(m?.erg || "").trim().length > 0;
 
-const computeHomeFlag = (m) => {
-  const heim = stripClubId(m?.heim);
-  return heim.toLowerCase().includes(OUR_CLUB.toLowerCase());
+const involvesOurClub = (m) => {
+  const o = OUR_CLUB.toLowerCase();
+  const heim = stripClubId(m?.heim).toLowerCase();
+  const gast = stripClubId(m?.gast).toLowerCase();
+  return heim.includes(o) || gast.includes(o);
+};
+
+const computeHomeFlagForOurClub = (m) => {
+  // Heim, wenn unser Verein links steht (auch wenn Halle neutral ist)
+  const heim = stripClubId(m?.heim).toLowerCase();
+  return heim.includes(OUR_CLUB.toLowerCase());
 };
 
 const buildOpponentText = (m) => {
@@ -43,8 +57,7 @@ const mapMatch = (m) => {
   return {
     id: `${m?.datum}-${m?.uhrzeit}-${m?.heim}-${m?.gast}`,
     date: d ? d.toISOString() : null,
-    dateObj: d,
-    home: computeHomeFlag(m),
+    dateObj: d, // nur intern zum Sortieren
     opponent: buildOpponentText(m),
     venue: m?.halle || "—",
     erg: String(m?.erg || "").trim(),
@@ -69,8 +82,9 @@ const splitMatches = (all) => {
       continue;
     }
 
+    // Ohne Ergebnis -> Datum entscheidet
     if (m.dateObj >= now) upcoming.push(m);
-    else played.push(m);
+    else played.push(m); // falls alte Zeile ohne Ergebnis
   }
 
   upcoming.sort(sortByDateAsc);
@@ -79,33 +93,10 @@ const splitMatches = (all) => {
   return { upcoming, played };
 };
 
-const involvesOurClub = (m) => {
-  const o = OUR_CLUB.toLowerCase();
-  return String(m?.heim || "").toLowerCase().includes(o) || String(m?.gast || "").toLowerCase().includes(o);
-};
-
-
-function formatDateTimeDE(iso) {
+function formatDateDE(iso) {
   if (!iso) return "—";
   try {
     const d = new Date(iso);
-    return d.toLocaleString("de-DE", {
-      weekday: "short",
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
-}
-
-function formatDateDE(isoOrDateKey) {
-  if (!isoOrDateKey) return "—";
-  try {
-    const d = new Date(isoOrDateKey);
     return d.toLocaleDateString("de-DE", {
       weekday: "short",
       day: "2-digit",
@@ -113,7 +104,7 @@ function formatDateDE(isoOrDateKey) {
       year: "numeric",
     });
   } catch {
-    return isoOrDateKey;
+    return iso;
   }
 }
 
@@ -158,7 +149,6 @@ function TabButton({ label, active, onPress }) {
 }
 
 export default function TeamDetailsScreen({ route, navigation }) {
-  // TeamsScreen sendet: navigation.navigate("TeamDetails", { teamId, label })
   const teamId = route?.params?.teamId || "unknown";
   const teamTitle =
     route?.params?.teamTitle ||
@@ -166,45 +156,22 @@ export default function TeamDetailsScreen({ route, navigation }) {
     route?.params?.team ||
     "Team";
 
-const [tab, setTab] = useState("teg");
- // overview | matches | table
+  const [tab, setTab] = useState("teg"); // teg | table | liga
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const [payload, setPayload] = useState(null);
   const [error, setError] = useState("");
 
-  // Demo-Daten (Fallback)
+  // Fallback Demo (nur wenn API down ist)
   const demo = useMemo(
     () => ({
       team: teamTitle,
-      season: "Sommer 2026",
+      season: "Winter 2025/2026",
       status: "ACTIVE",
-      last_updated: new Date().toISOString(),
-      next_matches: [
-        {
-          id: "m1",
-          date: "2026-03-08T09:00:00.000Z",
-          home: true,
-          opponent: "TC Beispielstadt",
-          venue: "Tacherting Tennisanlage",
-        },
-      ],
-      matches: [
-        {
-          id: "m2",
-          date: "2026-03-08T09:00:00.000Z",
-          home: true,
-          opponent: "TC Beispielstadt",
-          venue: "Tacherting Tennisanlage",
-        },
-      ],
-      table: [
-        { rank: 1, club: "TEG Tacherting", played: 3, points: "6:0" },
-        { rank: 2, club: "TC Beispielstadt", played: 3, points: "4:2" },
-        { rank: 3, club: "SV Irgendwo", played: 3, points: "2:4" },
-        { rank: 4, club: "TSV Muster", played: 3, points: "0:6" },
-      ],
+      matches: [],
+      next_matches: [],
+      table: [],
     }),
     [teamTitle]
   );
@@ -212,13 +179,11 @@ const [tab, setTab] = useState("teg");
   const fetchTeam = async () => {
     setError("");
     try {
-      // ✅ korrektes Endpoint-Format
       const url = `${API_BASE_URL}/api/teams?teamId=${encodeURIComponent(teamId)}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
 
-      // ✅ wir wollen nur payload (table/matches/next_matches)
       if (json?.ok && json?.payload) {
         setPayload(json.payload);
       } else {
@@ -226,7 +191,7 @@ const [tab, setTab] = useState("teg");
       }
     } catch (e) {
       setError(e?.message || String(e));
-      setPayload(demo); // fallback
+      setPayload(demo);
     }
   };
 
@@ -245,49 +210,34 @@ const [tab, setTab] = useState("teg");
     setRefreshing(false);
   };
 
-  // -------- Mapping: Backend -> UI (damit Layout unverändert bleibt) --------
-// -------- Mapping: Backend -> UI --------
-const apiMatches = payload?.matches || [];
-const apiNext = payload?.next_matches || [];
+  // ======= UI-Daten aus payload bauen =======
 
-const toIso = (datum, uhrzeit) => {
-  if (!datum) return null;
-  const parts = String(datum).split(".");
-  if (parts.length !== 3) return datum;
-  const isoDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
-  const time = uhrzeit || "00:00";
-  return `${isoDate}T${time}:00.000Z`;
-};
+  // Tabelle normalisieren
+  const table = (payload?.table || []).map((r) => ({
+    rank: Number(r?.rang ?? 0) || 0,
+    club: stripClubId(r?.mannschaft),
+    played: Number(r?.begegnungen ?? 0) || 0,
+    points: r?.punkte || "—",
+  }));
 
-const mapMatch = (m) => {
-  const dateIso = toIso(m?.datum, m?.uhrzeit);
-  const score = m?.erg ? ` · ${m.erg}` : "";
-  const club = "TeG Alzstadt";
-  const isHome = (m?.heim || "").toLowerCase().includes(club.toLowerCase());
-  return {
-    id: `${m?.datum}-${m?.uhrzeit}-${m?.heim}-${m?.gast}-${m?.erg}`,
-    date: dateIso,
-    home: isHome, // später optional korrekt setzen
-    opponent: `${m?.heim || "—"} vs ${m?.gast || "—"}${score}`,
-    venue: m?.halle || "—",
-  };
-};
+  // Matches normalisieren
+  const rawMatches = payload?.matches || [];
+  const allMatches = rawMatches.map(mapMatch).filter((m) => m.dateObj);
 
-const upcoming = apiNext.map(mapMatch);
-const matches = apiMatches.map(mapMatch); // alle Begegnungen
+  // TEG = nur unsere Spiele
+  const ourMatchesRaw = allMatches.filter(involvesOurClub).map((m) => ({
+    ...m,
+    home: computeHomeFlagForOurClub(m),
+  }));
+  const { upcoming: ourUpcoming, played: ourPlayed } = splitMatches(ourMatchesRaw);
+  const tegList = [...ourUpcoming, ...ourPlayed];
 
-const nextMatch = upcoming[0] || null;
+  // Liga = alle Spiele
+  const { upcoming: ligaUpcoming, played: ligaPlayed } = splitMatches(allMatches);
+  const ligaList = [...ligaUpcoming, ...ligaPlayed];
 
-const stripClubId = (s) => String(s || "").replace(/\s*\(\d+\)\s*$/, "").trim();
-
-const table = (payload?.table || []).map((r) => ({
-  rank: Number(r?.rang ?? 0) || 0,
-  club: stripClubId(r?.mannschaft),
-  played: Number(r?.begegnungen ?? 0) || 0,
-  points: r?.punkte || "—",
-}));
-
-
+  // Hero Next Match: nur TEG
+  const nextMatch = ourUpcoming[0] || null;
 
   if (loading) {
     return (
@@ -331,7 +281,7 @@ const table = (payload?.table || []).map((r) => ({
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />
         }
       >
-        {/* Hero / Summary */}
+        {/* Hero */}
         <View style={styles.heroCard}>
           <View style={styles.heroTopRow}>
             <Text style={styles.seasonText}>{payload?.season || "—"}</Text>
@@ -344,11 +294,8 @@ const table = (payload?.table || []).map((r) => ({
             </Text>
           )}
 
-
-
-          {/* Next match highlight */}
           <View style={styles.nextMatchCard}>
-            <Text style={styles.sectionTitle}>Nächstes Spiel</Text>
+            <Text style={styles.sectionTitle}>Nächstes Spiel (TEG)</Text>
 
             {payload?.status === "PENDING" ? (
               <Text style={styles.mutedText}>Spielplan ist noch nicht veröffentlicht.</Text>
@@ -365,124 +312,28 @@ const table = (payload?.table || []).map((r) => ({
                 </Text>
               </>
             ) : (
-              <Text style={styles.mutedText}>Aktuell kein nächstes Spiel gefunden.</Text>
+              <Text style={styles.mutedText}>Aktuell kein nächstes TEG-Spiel gefunden.</Text>
             )}
           </View>
         </View>
 
         {/* Tabs */}
-<View style={styles.tabsRow}>
-  <TabButton label="TEG" active={tab === "teg"} onPress={() => setTab("teg")} />
-  <TabButton label="Tabelle" active={tab === "table"} onPress={() => setTab("table")} />
-  <TabButton label="Liga" active={tab === "liga"} onPress={() => setTab("liga")} />
-</View>
+        <View style={styles.tabsRow}>
+          <TabButton label="TEG" active={tab === "teg"} onPress={() => setTab("teg")} />
+          <TabButton label="Tabelle" active={tab === "table"} onPress={() => setTab("table")} />
+          <TabButton label="Liga" active={tab === "liga"} onPress={() => setTab("liga")} />
+        </View>
 
-
-        {/* ======= OVERVIEW ======= */}
-        {tab === "overview" && (
-          <View style={{ marginTop: 12 }}>
-            {/* Stats Row */}
-            <View style={styles.statsRow}>
-              <View style={styles.statCard}>
-                <Text style={styles.statLabel}>Saisonstatus</Text>
-                <Text style={styles.statValue}>
-                  {payload?.status === "ACTIVE"
-                    ? "Aktiv"
-                    : payload?.status === "PENDING"
-                    ? "Pending"
-                    : payload?.status === "FINISHED"
-                    ? "Beendet"
-                    : "—"}
-                </Text>
-                <Text style={styles.statHint}>automatisch aktualisiert</Text>
-              </View>
-
-              <View style={styles.statCard}>
-                <Text style={styles.statLabel}>Begegnungen</Text>
-                <Text style={styles.statValue}>{matches?.length ? `${matches.length}` : "0"}</Text>
-                <Text style={styles.statHint}>im Spielplan</Text>
-              </View>
-            </View>
-
-            {/* Preview Matches */}
-            <View style={styles.card}>
-              <View style={styles.cardTitleRow}>
-                <Text style={styles.sectionTitle}>Kommende Begegnungen</Text>
-                <TouchableOpacity onPress={() => setTab("matches")} style={styles.smallLinkBtn}>
-                  <Text style={styles.smallLinkText}>Alle ansehen →</Text>
-                </TouchableOpacity>
-              </View>
-
-              {payload?.status === "PENDING" ? (
-                <Text style={styles.mutedText}>Spielplan ist noch nicht veröffentlicht.</Text>
-              ) : matches.length === 0 ? (
-                <Text style={styles.mutedText}>Keine Begegnungen vorhanden.</Text>
-              ) : (
-                upcoming.slice(0, 3).map((m) => (
-
-                  <View key={m.id || `${m.date}-${m.opponent}`} style={styles.previewRow}>
-                    <View style={[styles.chip, m.home ? styles.chipHome : styles.chipAway]}>
-                      <Text style={styles.chipText}>{m.home ? "HEIM" : "AUSW"}</Text>
-                    </View>
-
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.previewOpponent} numberOfLines={1}>
-                        {m.opponent || "—"}
-                      </Text>
-                      <Text style={styles.previewMeta} numberOfLines={1}>
-                        {formatDateDE(m.date)} · {m.venue || "—"}
-                      </Text>
-                    </View>
-                  </View>
-                ))
-              )}
-            </View>
-
-            {/* Preview Table */}
-            <View style={styles.card}>
-              <View style={styles.cardTitleRow}>
-                <Text style={styles.sectionTitle}>Tabelle (Top 4)</Text>
-                <TouchableOpacity onPress={() => setTab("table")} style={styles.smallLinkBtn}>
-                  <Text style={styles.smallLinkText}>Öffnen →</Text>
-                </TouchableOpacity>
-              </View>
-
-              {payload?.status === "PENDING" ? (
-                <Text style={styles.mutedText}>Noch keine Tabelle verfügbar.</Text>
-              ) : table.length === 0 ? (
-                <Text style={styles.mutedText}>Noch keine Tabelle verfügbar.</Text>
-              ) : (
-                table.slice(0, 4).map((row) => (
-                  <View
-                    key={`${row.rank}-${row.club}`}
-                    style={[
-                      styles.tablePreviewRow,
-                      String(row.club || "").toLowerCase().includes("tacherting") &&
-                        styles.tableRowHighlight,
-                    ]}
-                  >
-                    <Text style={styles.tablePreviewRank}>{row.rank}</Text>
-                    <Text style={styles.tablePreviewClub} numberOfLines={1}>
-                      {row.club}
-                    </Text>
-                    <Text style={styles.tablePreviewRight}>{row.points ?? "—"}</Text>
-                  </View>
-                ))
-              )}
-            </View>
-          </View>
-        )}
-
-        {/* ======= MATCHES ======= */}
-        {tab === "matches" && (
+        {/* ======= TEG TAB ======= */}
+        {tab === "teg" && (
           <View style={{ paddingHorizontal: 14, marginTop: 12 }}>
-            {matches.length === 0 ? (
+            {tegList.length === 0 ? (
               <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Begegnungen</Text>
-                <Text style={styles.mutedText}>Keine Begegnungen vorhanden.</Text>
+                <Text style={styles.sectionTitle}>TEG Begegnungen</Text>
+                <Text style={styles.mutedText}>Keine Begegnungen für TeG Alzstadt gefunden.</Text>
               </View>
             ) : (
-              matches.map((m) => (
+              tegList.map((m) => (
                 <View key={m.id || `${m.date}-${m.opponent}`} style={styles.matchCard}>
                   <View style={styles.matchTopRow}>
                     <View style={[styles.chip, m.home ? styles.chipHome : styles.chipAway]}>
@@ -499,7 +350,7 @@ const table = (payload?.table || []).map((r) => ({
           </View>
         )}
 
-        {/* ======= TABLE ======= */}
+        {/* ======= TABLE TAB ======= */}
         {tab === "table" && (
           <View style={{ paddingHorizontal: 14, marginTop: 12 }}>
             <View style={styles.card}>
@@ -517,14 +368,7 @@ const table = (payload?.table || []).map((r) => ({
                   </View>
 
                   {table.map((row) => (
-                    <View
-                      key={`${row.rank}-${row.club}`}
-                      style={[
-                        styles.tableRow,
-                        String(row.club || "").toLowerCase().includes("tacherting") &&
-                          styles.tableRowHighlight,
-                      ]}
-                    >
+                    <View key={`${row.rank}-${row.club}`} style={styles.tableRow}>
                       <Text style={[styles.td, { width: 40 }]}>{row.rank}</Text>
                       <Text style={[styles.td, { flex: 1 }]} numberOfLines={1}>
                         {row.club}
@@ -540,6 +384,32 @@ const table = (payload?.table || []).map((r) => ({
                 </View>
               )}
             </View>
+          </View>
+        )}
+
+        {/* ======= LIGA TAB ======= */}
+        {tab === "liga" && (
+          <View style={{ paddingHorizontal: 14, marginTop: 12 }}>
+            {ligaList.length === 0 ? (
+              <View style={styles.card}>
+                <Text style={styles.sectionTitle}>Liga Begegnungen</Text>
+                <Text style={styles.mutedText}>Keine Liga-Begegnungen gefunden.</Text>
+              </View>
+            ) : (
+              ligaList.map((m) => (
+                <View key={m.id || `${m.date}-${m.opponent}`} style={styles.matchCard}>
+                  <View style={styles.matchTopRow}>
+                    <View style={[styles.chip, styles.chipNeutral]}>
+                      <Text style={styles.chipText}>LIGA</Text>
+                    </View>
+                    <Text style={styles.matchDate}>{formatDateDE(m.date)}</Text>
+                  </View>
+
+                  <Text style={styles.matchOpponent}>{m.opponent || "—"}</Text>
+                  <Text style={styles.matchVenue}>{m.venue || "—"}</Text>
+                </View>
+              ))
+            )}
           </View>
         )}
       </ScrollView>
@@ -585,7 +455,6 @@ const styles = StyleSheet.create({
   },
   heroTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   seasonText: { color: "#ffffff", fontSize: 16, fontWeight: "900" },
-  lastUpdated: { color: "#9fb0c8", fontSize: 12, marginTop: 8 },
 
   warningText: {
     marginTop: 10,
@@ -594,11 +463,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 
-  badge: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-  },
+  badge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
   badgeText: { fontSize: 11, fontWeight: "900" },
   badgeNeutral: { backgroundColor: "rgba(195, 208, 234, 0.12)" },
   badgeActive: { backgroundColor: "rgba(46, 204, 113, 0.18)" },
@@ -638,60 +503,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: "rgba(8, 35, 80, 0.55)",
   },
-  tabBtnActive: {
-    backgroundColor: "#f28b25",
-    borderColor: "#f28b25",
-  },
+  tabBtnActive: { backgroundColor: "#f28b25", borderColor: "#f28b25" },
   tabText: { color: "#ffffff", fontSize: 13, fontWeight: "900" },
   tabTextActive: { color: "#001738" },
 
   card: {
     marginTop: 12,
-    marginHorizontal: 14,
     backgroundColor: "#022449",
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
     borderColor: "#355a8a",
   },
-
-  // Overview stats
-  statsRow: {
-    flexDirection: "row",
-    gap: 10,
-    paddingHorizontal: 14,
-  },
-  statCard: {
-    flex: 1,
-    backgroundColor: "rgba(8, 35, 80, 0.85)",
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#183b63",
-  },
-  statLabel: { color: "#9fb0c8", fontSize: 12, fontWeight: "800" },
-  statValue: { marginTop: 6, color: "#ffffff", fontSize: 22, fontWeight: "900" },
-  statHint: { marginTop: 4, color: "#c3d0ea", fontSize: 12 },
-
-  cardTitleRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  smallLinkBtn: { paddingVertical: 4, paddingHorizontal: 6 },
-  smallLinkText: { color: "#f28b25", fontSize: 12, fontWeight: "800" },
-
-  // Preview rows
-  previewRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(53, 90, 138, 0.35)",
-  },
-  previewOpponent: { color: "#ffffff", fontSize: 14, fontWeight: "900" },
-  previewMeta: { marginTop: 2, color: "#c3d0ea", fontSize: 12, fontWeight: "700" },
 
   matchCard: {
     marginTop: 12,
@@ -702,14 +525,10 @@ const styles = StyleSheet.create({
     borderColor: "#355a8a",
   },
   matchTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  chip: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
+  chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
   chipHome: { borderColor: "#2ecc71" },
   chipAway: { borderColor: "#e67e22" },
+  chipNeutral: { borderColor: "#355a8a" },
   chipText: { color: "#ffffff", fontSize: 11, fontWeight: "900" },
   matchDate: { color: "#c3d0ea", fontSize: 12, fontWeight: "800" },
   matchOpponent: { marginTop: 10, color: "#ffffff", fontSize: 16, fontWeight: "900" },
@@ -725,23 +544,5 @@ const styles = StyleSheet.create({
   },
   th: { color: "#9fb0c8", fontSize: 12, fontWeight: "900" },
   tableRow: { flexDirection: "row", paddingVertical: 10 },
-  tableRowHighlight: {
-    backgroundColor: "rgba(242, 139, 37, 0.12)",
-    borderRadius: 12,
-    paddingHorizontal: 8,
-  },
   td: { color: "#ffffff", fontSize: 13, fontWeight: "800" },
-
-  // Table preview
-  tablePreviewRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: 10,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(53, 90, 138, 0.35)",
-    gap: 10,
-  },
-  tablePreviewRank: { width: 24, color: "#c3d0ea", fontWeight: "900" },
-  tablePreviewClub: { flex: 1, color: "#ffffff", fontWeight: "900" },
-  tablePreviewRight: { width: 70, textAlign: "right", color: "#c3d0ea", fontWeight: "900" },
 });
