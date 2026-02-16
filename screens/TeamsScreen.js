@@ -65,7 +65,7 @@ export default function TeamsScreen({ navigation }) {
         {/* STEP 1: CATEGORY */}
         {step === "CATEGORY" && (
           <>
-            <Text style={styles.sectionTitle}>Was möchtest du sehen?</Text>
+            
 
             <TouchableOpacity
               style={styles.bigCard}
@@ -131,13 +131,7 @@ export default function TeamsScreen({ navigation }) {
               />
             </View>
 
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Info</Text>
-              <Text style={styles.cardSub}>
-                Sommer: Herren I + Herren II{"\n"}
-                Winter: eine Herren-Mannschaft
-              </Text>
-            </View>
+
           </>
         )}
 
@@ -254,15 +248,18 @@ const styles = StyleSheet.create({
   hint: { color: "#9fb0c8", fontSize: 12 },
 
   chipsRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
-  chip: {
-    flex: 1,
-    backgroundColor: "rgba(8, 35, 80, 0.55)",
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#355a8a",
-    paddingVertical: 10,
-    alignItems: "center",
-  },
+chip: {
+  flex: 1,
+  backgroundColor: "rgba(8, 35, 80, 0.55)",
+  borderRadius: 18,
+  borderWidth: 1,
+  borderColor: "#355a8a",
+  paddingVertical: 18,     // vorher 10
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 120,          // neu: macht die Fläche groß
+},
+
   chipActive: { backgroundColor: "#f28b25", borderColor: "#f28b25" },
   chipText: { color: "#ffffff", fontSize: 13, fontWeight: "800" },
   chipTextActive: { color: "#001738" },
