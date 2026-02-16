@@ -173,18 +173,18 @@ export default function TeamDetailsScreen({ route, navigation }) {
   };
 
   // -------- Mapping: Backend -> UI (damit Layout unverändert bleibt) --------
-  const apiMatches = payload?.matches || [];
-  const apiNext = payload?.next_matches || [];
+// -------- Mapping: Backend -> UI --------
+const apiMatches = payload?.matches || [];
+const apiNext = payload?.next_matches || [];
 
-  const toIso = (datum, uhrzeit) => {
-    // datum "05.10.2025" -> "2025-10-05T15:00:00.000Z"
-    if (!datum) return null;
-    const parts = String(datum).split(".");
-    if (parts.length !== 3) return datum;
-    const isoDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
-    const time = uhrzeit || "00:00";
-    return `${isoDate}T${time}:00.000Z`;
-  };
+const toIso = (datum, uhrzeit) => {
+  if (!datum) return null;
+  const parts = String(datum).split(".");
+  if (parts.length !== 3) return datum;
+  const isoDate = `${parts[2]}-${parts[1]}-${parts[0]}`;
+  const time = uhrzeit || "00:00";
+  return `${isoDate}T${time}:00.000Z`;
+};
 
 const mapMatch = (m) => {
   const dateIso = toIso(m?.datum, m?.uhrzeit);
@@ -192,22 +192,24 @@ const mapMatch = (m) => {
   return {
     id: `${m?.datum}-${m?.uhrzeit}-${m?.heim}-${m?.gast}-${m?.erg}`,
     date: dateIso,
-    home: true, // optional später korrekt setzen
+    home: true, // später optional korrekt setzen
     opponent: `${m?.heim || "—"} vs ${m?.gast || "—"}${score}`,
     venue: m?.halle || "—",
   };
 };
 
+const upcoming = apiNext.map(mapMatch);
+const matches = apiMatches.map(mapMatch); // alle Begegnungen
 
-  const nextMatch = apiNext[0] ? mapMatch(apiNext[0]) : null;
-  const matches = apiMatches.length ? apiMatches.map(mapMatch) : apiNext.map(mapMatch);
+const nextMatch = upcoming[0] || null;
 
-  const table = (payload?.table || []).map((r) => ({
-    rank: r?.rang,
-    club: r?.mannschaft,
-    played: r?.begegnungen,
-    points: r?.punkte,
-  }));
+const table = (payload?.table || []).map((r) => ({
+  rank: r?.rang,
+  club: r?.mannschaft,
+  played: r?.begegnungen,
+  points: r?.punkte,
+}));
+
 
   if (loading) {
     return (
