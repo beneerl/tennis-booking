@@ -11,6 +11,7 @@ import {
   StatusBar,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useNavigation } from "@react-navigation/native";
 
 const STORAGE_PROFILE = "lk_profile_v1";
 const STORAGE_HISTORY = "lk_history_v1";
@@ -129,12 +130,16 @@ const calcImprovementDoubleForOneWinner = ({
 };
 
 export default function LKScreen() {
+  const navigation = useNavigation();
   const [loading, setLoading] = useState(true);
 
   // Profil
   const [currentLK, setCurrentLK] = useState(16.0);
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [useMotivation, setUseMotivation] = useState(false);
+
+  // Damit Komma-Eingabe sauber funktioniert (z.B. "20," beim Tippen)
+  const [currentLKText, setCurrentLKText] = useState("16,0");
 
   // Formular
   const [opponentLK, setOpponentLK] = useState("");
@@ -177,6 +182,12 @@ export default function LKScreen() {
   useEffect(() => {
     load();
   }, []);
+
+  // wenn currentLK geladen/gesetzt wird, Input-Text synchron halten
+  useEffect(() => {
+    setCurrentLKText(fmt(round3(toNumber(currentLK) ?? 0)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   useEffect(() => {
     if (loading) return;
@@ -260,7 +271,10 @@ export default function LKScreen() {
     setHistory(nextHistory);
     await saveHistory(nextHistory);
 
-    if (autoUpdate) setCurrentLK(lkAfter);
+    if (autoUpdate) {
+      setCurrentLK(lkAfter);
+      setCurrentLKText(fmt(lkAfter));
+    }
 
     setOpponentLK("");
     setPartnerLK("");
@@ -273,7 +287,10 @@ export default function LKScreen() {
     setHistory(rest);
     await saveHistory(rest);
 
-    if (autoUpdate && latest?.lkBefore != null) setCurrentLK(latest.lkBefore);
+    if (autoUpdate && latest?.lkBefore != null) {
+      setCurrentLK(latest.lkBefore);
+      setCurrentLKText(fmt(latest.lkBefore));
+    }
   };
 
   const headerLK = useMemo(() => round3(toNumber(currentLK) ?? 0), [currentLK]);
@@ -282,7 +299,13 @@ export default function LKScreen() {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
-        <Text style={styles.title}>LK</Text>
+        <View style={styles.headerRow}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+            <Text style={styles.backText}>{"< Zurück"}</Text>
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>LK</Text>
+          <View style={{ width: 70 }} />
+        </View>
         <Text style={styles.muted}>Lade…</Text>
       </View>
     );
@@ -292,19 +315,27 @@ export default function LKScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
-        <Text style={styles.title}>LK</Text>
+      {/* Header */}
+      <View style={styles.headerRow}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
+          <Text style={styles.backText}>{"< Zurück"}</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>LK</Text>
+        <View style={{ width: 70 }} />
+      </View>
 
+      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Aktuelle LK</Text>
           <TextInput
-            value={fmt(currentLK)}
+            value={currentLKText}
             onChangeText={(t) => {
-              const n = toNumber(t);
-              if (n == null) return;
-              setCurrentLK(n);
+              const cleaned = String(t).replace(".", ",");
+              setCurrentLKText(cleaned);
+              const n = toNumber(cleaned);
+              if (n != null) setCurrentLK(n);
             }}
-            keyboardType="decimal-pad"
+            keyboardType="numbers-and-punctuation"
             style={styles.input}
             placeholder="z.B. 16,3"
             placeholderTextColor="#7f93b0"
@@ -371,35 +402,48 @@ export default function LKScreen() {
             </TouchableOpacity>
           </View>
 
-          <Text style={styles.label}>Gegner-LK</Text>
-          <TextInput
-            value={opponentLK}
-            onChangeText={setOpponentLK}
-            keyboardType="decimal-pad"
-            style={styles.input}
-            placeholder="z.B. 14,8"
-            placeholderTextColor="#7f93b0"
-          />
-
-          {type === "double" && (
+          {/* Inputs: Einzel vs Doppel */}
+          {type === "double" ? (
             <>
-              <Text style={styles.label}>Partner-LK (optional, für korrekte Doppelrechnung)</Text>
+              <Text style={styles.label}>Partner-LK</Text>
               <TextInput
                 value={partnerLK}
                 onChangeText={setPartnerLK}
-                keyboardType="decimal-pad"
+                keyboardType="numbers-and-punctuation"
                 style={styles.input}
                 placeholder="z.B. 18,5"
                 placeholderTextColor="#7f93b0"
               />
 
-              <Text style={styles.label}>Gegner Partner-LK (optional)</Text>
+              <Text style={styles.label}>Gegner-LK 1</Text>
+              <TextInput
+                value={opponentLK}
+                onChangeText={setOpponentLK}
+                keyboardType="numbers-and-punctuation"
+                style={styles.input}
+                placeholder="z.B. 14,8"
+                placeholderTextColor="#7f93b0"
+              />
+
+              <Text style={styles.label}>Gegner-LK 2</Text>
               <TextInput
                 value={opponentPartnerLK}
                 onChangeText={setOpponentPartnerLK}
-                keyboardType="decimal-pad"
+                keyboardType="numbers-and-punctuation"
                 style={styles.input}
                 placeholder="z.B. 16,2"
+                placeholderTextColor="#7f93b0"
+              />
+            </>
+          ) : (
+            <>
+              <Text style={styles.label}>Gegner-LK</Text>
+              <TextInput
+                value={opponentLK}
+                onChangeText={setOpponentLK}
+                keyboardType="numbers-and-punctuation"
+                style={styles.input}
+                placeholder="z.B. 14,8"
                 placeholderTextColor="#7f93b0"
               />
             </>
@@ -441,7 +485,16 @@ export default function LKScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#001738", paddingTop: 40, paddingHorizontal: 14 },
-  title: { color: "#fff", fontSize: 18, fontWeight: "900", marginBottom: 12 },
+
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 12,
+  },
+  backBtn: { paddingVertical: 8, paddingRight: 12 },
+  backText: { color: "#f28b25", fontSize: 14, fontWeight: "700" },
+  headerTitle: { color: "#ffffff", fontSize: 18, fontWeight: "900", flex: 1, textAlign: "center" },
 
   card: {
     backgroundColor: "#022449",
