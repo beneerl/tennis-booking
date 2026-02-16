@@ -186,16 +186,18 @@ export default function TeamDetailsScreen({ route, navigation }) {
     return `${isoDate}T${time}:00.000Z`;
   };
 
-  const mapMatch = (m) => {
-    const dateIso = toIso(m?.datum, m?.uhrzeit);
-    return {
-      id: `${m?.datum}-${m?.uhrzeit}-${m?.heim}-${m?.gast}-${m?.erg}`,
-      date: dateIso,
-      home: true, // optional später korrekt setzen
-      opponent: `${m?.heim || "—"} vs ${m?.gast || "—"} (${m?.erg || "—"})`,
-      venue: m?.halle || "—",
-    };
+const mapMatch = (m) => {
+  const dateIso = toIso(m?.datum, m?.uhrzeit);
+  const score = m?.erg ? ` · ${m.erg}` : "";
+  return {
+    id: `${m?.datum}-${m?.uhrzeit}-${m?.heim}-${m?.gast}-${m?.erg}`,
+    date: dateIso,
+    home: true, // optional später korrekt setzen
+    opponent: `${m?.heim || "—"} vs ${m?.gast || "—"}${score}`,
+    venue: m?.halle || "—",
   };
+};
+
 
   const nextMatch = apiNext[0] ? mapMatch(apiNext[0]) : null;
   const matches = apiMatches.length ? apiMatches.map(mapMatch) : apiNext.map(mapMatch);
@@ -337,7 +339,8 @@ export default function TeamDetailsScreen({ route, navigation }) {
               ) : matches.length === 0 ? (
                 <Text style={styles.mutedText}>Keine Begegnungen vorhanden.</Text>
               ) : (
-                matches.slice(0, 3).map((m) => (
+                upcoming.slice(0, 3).map((m) => (
+
                   <View key={m.id || `${m.date}-${m.opponent}`} style={styles.previewRow}>
                     <View style={[styles.chip, m.home ? styles.chipHome : styles.chipAway]}>
                       <Text style={styles.chipText}>{m.home ? "HEIM" : "AUSW"}</Text>
