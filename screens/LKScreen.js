@@ -594,9 +594,18 @@ export default function LKScreen({ route }) {
             <View style={styles.boardHeaderRow}>
               <Text style={styles.cardTitle}>Rangliste</Text>
 
-              <TouchableOpacity onPress={loadLeaderboard} style={styles.refreshBtn} activeOpacity={0.9}>
-                <Text style={styles.refreshText}>↻</Text>
-              </TouchableOpacity>
+<TouchableOpacity
+  onPress={async () => {
+    const n = toNumber(currentLK);
+    if (optIn && n != null) await upsertProfile(n);   // ✅ erst hochschreiben
+    await loadLeaderboard();                          // ✅ dann neu laden
+  }}
+  style={styles.refreshBtn}
+  activeOpacity={0.9}
+>
+  <Text style={styles.refreshText}>↻</Text>
+</TouchableOpacity>
+
             </View>
 
             {lbLoading ? (
