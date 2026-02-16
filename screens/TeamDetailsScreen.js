@@ -32,7 +32,6 @@ const parseDEDateTime = (datum, uhrzeit) => {
 
 const isPlayed = (m) => String(m?.erg || "").trim().length > 0;
 
-// ✅ Status für UI-Highlight (gespielt vs kommend)
 const getMatchState = (m) => {
   // gespielt, wenn Ergebnis da ist ODER Termin in der Vergangenheit ist
   if (String(m?.erg || "").trim()) return "played";
@@ -54,20 +53,13 @@ const computeHomeFlagForOurClub = (m) => {
   return heim.includes(OUR_CLUB.toLowerCase());
 };
 
-const buildOpponentText = (m) => {
-  const heim = stripClubId(m?.heim);
-  const gast = stripClubId(m?.gast);
-  const erg = String(m?.erg || "").trim();
-  return erg ? `${heim} vs ${gast} (${erg})` : `${heim} vs ${gast}`;
-};
-
 const mapMatch = (m) => {
   const d = parseDEDateTime(m?.datum, m?.uhrzeit);
   return {
     id: `${m?.datum}-${m?.uhrzeit}-${m?.heim}-${m?.gast}`,
     date: d ? d.toISOString() : null,
-    dateObj: d, // nur intern zum Sortieren
-    opponent: buildOpponentText(m),
+    dateObj: d, // intern
+    time: String(m?.uhrzeit || "").trim(), // ✅ Uhrzeit fürs UI
     venue: m?.halle || "—",
     erg: String(m?.erg || "").trim(),
     heim: stripClubId(m?.heim),
@@ -93,7 +85,7 @@ const splitMatches = (all) => {
 
     // Ohne Ergebnis -> Datum entscheidet
     if (m.dateObj >= now) upcoming.push(m);
-    else played.push(m); // falls alte Zeile ohne Ergebnis
+    else played.push(m);
   }
 
   upcoming.sort(sortByDateAsc);
@@ -160,10 +152,7 @@ function TabButton({ label, active, onPress }) {
 export default function TeamDetailsScreen({ route, navigation }) {
   const teamId = route?.params?.teamId || "unknown";
   const teamTitle =
-    route?.params?.teamTitle ||
-    route?.params?.label ||
-    route?.params?.team ||
-    "Team";
+    route?.params?.teamTitle || route?.params?.label || route?.params?.team || "Team";
 
   const [tab, setTab] = useState("teg"); // teg | table | liga
   const [loading, setLoading] = useState(true);
@@ -234,10 +223,10 @@ export default function TeamDetailsScreen({ route, navigation }) {
   const allMatches = rawMatches.map(mapMatch).filter((m) => m.dateObj);
 
   // TEG = nur unsere Spiele
-  const ourMatchesRaw = allMatches.filter(involvesOurClub).map((m) => ({
-    ...m,
-    home: computeHomeFlagForOurClub(m),
-  }));
+  const ourMatchesRaw = allMatches
+    .filter(involvesOurClub)
+    .map((m) => ({ ...m, home: computeHomeFlagForOurClub(m) }));
+
   const { upcoming: ourUpcoming, played: ourPlayed } = splitMatches(ourMatchesRaw);
   const tegList = [...ourUpcoming, ...ourPlayed];
 
@@ -312,11 +301,27 @@ export default function TeamDetailsScreen({ route, navigation }) {
               <>
                 <Text style={styles.bigLine}>
                   {nextMatch.home ? "🏠 Heim" : "🚌 Auswärts"} · {formatDateDE(nextMatch.date)}
+                  {nextMatch.time ? ` · ${nextMatch.time}` : ""}
                 </Text>
-                <Text style={styles.bigOpponent} numberOfLines={2}>
-                  {nextMatch.opponent}
-                </Text>
-                <Text style={styles.smallLine} numberOfLines={2}>
+
+                <View style={styles.teamsRow}>
+                  <View style={{ flex: 1, paddingRight: 10 }}>
+                    <Text style={styles.teamLine} numberOfLines={1}>
+                      {nextMatch.heim || "—"}
+                    </Text>
+                    <Text style={styles.teamLine} numberOfLines={1}>
+                      {nextMatch.gast || "—"}
+                    </Text>
+                  </View>
+
+                  {!!nextMatch.erg && (
+                    <View style={styles.scoreBox}>
+                      <Text style={styles.scoreText}>{nextMatch.erg}</Text>
+                    </View>
+                  )}
+                </View>
+
+                <Text style={styles.matchVenue} numberOfLines={2}>
                   {nextMatch.venue || "—"}
                 </Text>
               </>
@@ -342,43 +347,49 @@ export default function TeamDetailsScreen({ route, navigation }) {
                 <Text style={styles.mutedText}>Keine Begegnungen für TeG Alzstadt gefunden.</Text>
               </View>
             ) : (
-              tegList.map((m) => {
-                const state = getMatchState(m);
-
-                return (
-                  <View
-                    key={m.id || `${m.date}-${m.opponent}`}
-                    style={[
-                      styles.matchCard,
-                      state === "played" ? styles.matchCardPlayed : styles.matchCardUpcoming,
-                    ]}
-                  >
-                    <View style={styles.matchTopRow}>
-                      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                        <View style={[styles.chip, m.home ? styles.chipHome : styles.chipAway]}>
-                          <Text style={styles.chipText}>{m.home ? "HEIM" : "AUSWÄRTS"}</Text>
-                        </View>
-
-                        <View
-                          style={[
-                            styles.pill,
-                            state === "played" ? styles.pillPlayed : styles.pillUpcoming,
-                          ]}
-                        >
-                          <Text style={styles.pillText}>
-                            {state === "played" ? "GESPIELT" : "KOMMT"}
-                          </Text>
-                        </View>
-                      </View>
-
-                      <Text style={styles.matchDate}>{formatDateDE(m.date)}</Text>
+              tegList.map((m) => (
+                <View
+                  key={m.id || `${m.date}-${m.heim}-${m.gast}`}
+                  style={[
+                    styles.matchCard,
+                    getMatchState(m) === "played"
+                      ? styles.matchCardPlayed
+                      : styles.matchCardUpcoming,
+                  ]}
+                >
+                  <View style={styles.matchTopRow}>
+                    <View style={[styles.chip, m.home ? styles.chipHome : styles.chipAway]}>
+                      <Text style={styles.chipText}>{m.home ? "HEIM" : "AUSWÄRTS"}</Text>
                     </View>
 
-                    <Text style={styles.matchOpponent}>{m.opponent || "—"}</Text>
-                    <Text style={styles.matchVenue}>{m.venue || "—"}</Text>
+                    <Text style={styles.matchMetaRight}>
+                      {formatDateDE(m.date)}
+                      {m.time ? ` · ${m.time}` : ""}
+                    </Text>
                   </View>
-                );
-              })
+
+                  <View style={styles.teamsRow}>
+                    <View style={{ flex: 1, paddingRight: 10 }}>
+                      <Text style={styles.teamLine} numberOfLines={1}>
+                        {m.heim || "—"}
+                      </Text>
+                      <Text style={styles.teamLine} numberOfLines={1}>
+                        {m.gast || "—"}
+                      </Text>
+                    </View>
+
+                    {!!m.erg && (
+                      <View style={styles.scoreBox}>
+                        <Text style={styles.scoreText}>{m.erg}</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <Text style={styles.matchVenue} numberOfLines={2}>
+                    {m.venue || "—"}
+                  </Text>
+                </View>
+              ))
             )}
           </View>
         )}
@@ -429,43 +440,49 @@ export default function TeamDetailsScreen({ route, navigation }) {
                 <Text style={styles.mutedText}>Keine Liga-Begegnungen gefunden.</Text>
               </View>
             ) : (
-              ligaList.map((m) => {
-                const state = getMatchState(m);
-
-                return (
-                  <View
-                    key={m.id || `${m.date}-${m.opponent}`}
-                    style={[
-                      styles.matchCard,
-                      state === "played" ? styles.matchCardPlayed : styles.matchCardUpcoming,
-                    ]}
-                  >
-                    <View style={styles.matchTopRow}>
-                      <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
-                        <View style={[styles.chip, styles.chipNeutral]}>
-                          <Text style={styles.chipText}>LIGA</Text>
-                        </View>
-
-                        <View
-                          style={[
-                            styles.pill,
-                            state === "played" ? styles.pillPlayed : styles.pillUpcoming,
-                          ]}
-                        >
-                          <Text style={styles.pillText}>
-                            {state === "played" ? "GESPIELT" : "KOMMT"}
-                          </Text>
-                        </View>
-                      </View>
-
-                      <Text style={styles.matchDate}>{formatDateDE(m.date)}</Text>
+              ligaList.map((m) => (
+                <View
+                  key={m.id || `${m.date}-${m.heim}-${m.gast}`}
+                  style={[
+                    styles.matchCard,
+                    getMatchState(m) === "played"
+                      ? styles.matchCardPlayed
+                      : styles.matchCardUpcoming,
+                  ]}
+                >
+                  <View style={styles.matchTopRow}>
+                    <View style={[styles.chip, styles.chipNeutral]}>
+                      <Text style={styles.chipText}>LIGA</Text>
                     </View>
 
-                    <Text style={styles.matchOpponent}>{m.opponent || "—"}</Text>
-                    <Text style={styles.matchVenue}>{m.venue || "—"}</Text>
+                    <Text style={styles.matchMetaRight}>
+                      {formatDateDE(m.date)}
+                      {m.time ? ` · ${m.time}` : ""}
+                    </Text>
                   </View>
-                );
-              })
+
+                  <View style={styles.teamsRow}>
+                    <View style={{ flex: 1, paddingRight: 10 }}>
+                      <Text style={styles.teamLine} numberOfLines={1}>
+                        {m.heim || "—"}
+                      </Text>
+                      <Text style={styles.teamLine} numberOfLines={1}>
+                        {m.gast || "—"}
+                      </Text>
+                    </View>
+
+                    {!!m.erg && (
+                      <View style={styles.scoreBox}>
+                        <Text style={styles.scoreText}>{m.erg}</Text>
+                      </View>
+                    )}
+                  </View>
+
+                  <Text style={styles.matchVenue} numberOfLines={2}>
+                    {m.venue || "—"}
+                  </Text>
+                </View>
+              ))
             )}
           </View>
         )}
@@ -542,8 +559,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: { color: "#ffffff", fontSize: 14, fontWeight: "900", marginBottom: 8 },
   bigLine: { color: "#c3d0ea", fontSize: 13, marginBottom: 6 },
-  bigOpponent: { color: "#ffffff", fontSize: 18, fontWeight: "900" },
-  smallLine: { color: "#9fb0c8", marginTop: 4 },
+  smallLine: { color: "#9fb0c8", marginTop: 6 },
 
   tabsRow: {
     marginTop: 12,
@@ -582,36 +598,59 @@ const styles = StyleSheet.create({
     borderColor: "#355a8a",
   },
 
-  // ✅ Highlight je nach Status
   matchCardUpcoming: {
-    borderColor: "rgba(242, 139, 37, 0.7)",
-    backgroundColor: "rgba(8, 35, 80, 0.65)",
-  },
-  matchCardPlayed: {
-    borderColor: "rgba(53, 90, 138, 0.6)",
-    backgroundColor: "rgba(2, 36, 73, 0.85)",
+    borderColor: "#355a8a",
   },
 
-  // ✅ Mini-Badge (KOMMT / GESPIELT)
-  pill: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-    borderWidth: 1,
+  matchCardPlayed: {
+    borderColor: "rgba(255,255,255,0.18)",
+    opacity: 0.92,
   },
-  pillUpcoming: { borderColor: "rgba(242, 139, 37, 0.85)" },
-  pillPlayed: { borderColor: "rgba(46, 204, 113, 0.6)" },
-  pillText: { color: "#ffffff", fontSize: 11, fontWeight: "900" },
 
   matchTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
+
+  matchMetaRight: {
+    color: "#c3d0ea",
+    fontSize: 12,
+    fontWeight: "800",
+  },
+
   chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
   chipHome: { borderColor: "#2ecc71" },
   chipAway: { borderColor: "#e67e22" },
   chipNeutral: { borderColor: "#355a8a" },
   chipText: { color: "#ffffff", fontSize: 11, fontWeight: "900" },
-  matchDate: { color: "#c3d0ea", fontSize: 12, fontWeight: "800" },
-  matchOpponent: { marginTop: 10, color: "#ffffff", fontSize: 16, fontWeight: "900" },
-  matchVenue: { marginTop: 4, color: "#9fb0c8", fontSize: 13 },
+
+  teamsRow: {
+    marginTop: 10,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  teamLine: {
+    color: "#ffffff",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  scoreBox: {
+    minWidth: 56,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#f28b25",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  scoreText: {
+    color: "#f28b25",
+    fontSize: 14,
+    fontWeight: "900",
+  },
+
+  matchVenue: { marginTop: 6, color: "#9fb0c8", fontSize: 13 },
 
   // Table
   table: { marginTop: 8 },
