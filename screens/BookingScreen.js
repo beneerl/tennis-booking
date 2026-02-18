@@ -37,7 +37,13 @@ const generateTimeSlots = () => {
 
 const TIME_SLOTS = generateTimeSlots();
 const COURTS = ["P1", "P2", "P3"];
-const getDateKey = (d) => d.toISOString().split("T")[0];
+const getDateKey = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+};
+
 
 function confirmDelete(title, message) {
   if (Platform.OS === "web") {
@@ -68,6 +74,8 @@ export default function BookingScreen({ route, navigation }) {
 
   const [date, setDate] = useState(new Date());
   const [maxHoursPerDay, setMaxHoursPerDay] = useState(2);
+  const [sessionReady, setSessionReady] = useState(false);
+
 
   const [bookings, setBookings] = useState([]);
   const [blockedSlots, setBlockedSlots] = useState([]);
@@ -97,6 +105,42 @@ const pendingDeleteRef = useRef(new Set()); // merkt sich Slots, die gerade gel�
 
   const currentDateKey = getDateKey(date);
   const currentWeekday = date.getDay();
+useEffect(() => {
+  let sub = null;
+
+  const boot = async () => {
+    try {
+      // 1) Session lesen
+      const { data: s1 } = await supabase.auth.getSession();
+
+      // 2) iOS Home-Screen: manchmal erst nach refreshSession da
+      if (!s1?.session) {
+        await supabase.auth.refreshSession();
+      }
+
+      // 3) nochmal prüfen
+      const { data: s2 } = await supabase.auth.getSession();
+      setSessionReady(!!s2?.session?.user?.id);
+
+      // 4) bei Änderungen updaten (Login/Logout/Refresh)
+      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+        setSessionReady(!!session?.user?.id);
+      });
+      sub = data?.subscription;
+    } catch (e) {
+      console.log("boot session error:", e);
+      setSessionReady(false);
+    }
+  };
+
+  boot();
+
+  return () => {
+    try {
+      sub?.unsubscribe?.();
+    } catch {}
+  };
+}, []);
 
   // -------- Max-Stunden aus AsyncStorage laden --------
   useEffect(() => {
@@ -115,55 +159,100 @@ const pendingDeleteRef = useRef(new Set()); // merkt sich Slots, die gerade gel�
     };
     loadMaxHours();
   }, []);
+// Helper (oberhalb von loadBookingsForDate einfügen)
+async function ensureSupabaseSession() {
+  try {
+    const { data: s1, error: e1 } = await supabase.auth.getSession();
+    if (e1) console.log("getSession error:", e1.message);
+    if (s1?.session) return s1.session;
 
-  // -------- Buchungen laden --------
-  const loadBookingsForDate = async (dateKey) => {
-    try {
-      const { data, error } = await supabase
-        .from("bookings123")
-        .select("*")
-        .eq("date_key", dateKey);
+    // iOS PWA: Session ist manchmal erst nach refreshSession verfügbar
+    const { data: s2, error: e2 } = await supabase.auth.refreshSession();
+    if (e2) console.log("refreshSession error:", e2.message);
+    return s2?.session || null;
+  } catch (e) {
+    console.log("ensureSupabaseSession exception:", String(e));
+    return null;
+  }
+}
 
-      if (error) {
-        console.log("Supabase load error:", error.message);
-        Alert.alert("DB-Fehler (Buchungen laden)", error.message);
-        return;
-      }
+// ✅ ERSETZEN: deine Funktion komplett so übernehmen
+const loadBookingsForDate = async (dateKey) => {
+  try {
+    const { data: s } = await supabase.auth.getSession();
+if (!s?.session?.user?.id) {
+  console.log("No session yet -> skip bookings load");
+  setBookings([]);
+  return;
+}
 
-      const mapped = (data || []).map((row) => ({
-        id: `${row.court_index}-${row.time}-${row.date_key}`,
-        courtIndex: row.court_index,
-        time: row.time,
-        dateKey: row.date_key,
-        userName: row.user_name,
-        coPlayerName: row.player2 || "",
-      }));
-
-      const filtered = mapped.filter((b) => !pendingDeleteRef.current.has(b.id));
-setBookings(filtered);
-
-    } catch (e) {
-      console.log("Supabase load exception:", e);
-      Alert.alert("DB-Fehler (Exception)", String(e));
+    // 1) Session erzwingen (WICHTIG für iOS Home-Screen + RLS)
+    const session = await ensureSupabaseSession();
+    if (!session?.user?.id) {
+      console.log("No session in loadBookingsForDate (likely iOS PWA storage issue)");
+      showMessage(
+        "Nicht eingeloggt",
+        "Bitte einmal neu einloggen. (iOS Home-Bildschirm kann Sessions verlieren.)"
+      );
+      setBookings([]);
+      return;
     }
-  };
+
+    // 2) Query
+    const { data, error } = await supabase
+      .from("bookings123")
+      .select("*")
+      .eq("date_key", dateKey);
+
+    if (error) {
+      console.log("Supabase load error:", error.message);
+      showMessage("DB-Fehler (Buchungen laden)", error.message);
+      return;
+    }
+
+    // 3) Mapping
+    const mapped = (data || []).map((row) => ({
+      id: `${row.court_index}-${row.time}-${row.date_key}`,
+      courtIndex: row.court_index,
+      time: row.time,
+      dateKey: row.date_key,
+      userName: row.user_name,
+      coPlayerName: row.player2 || "",
+    }));
+
+    // 4) Pending deletes filtern (dein Code)
+    const filtered = mapped.filter((b) => !pendingDeleteRef.current.has(b.id));
+    setBookings(filtered);
+
+    // (Optional) Debug
+    console.log(`Bookings loaded for ${dateKey}:`, filtered.length);
+  } catch (e) {
+    console.log("Supabase load exception:", e);
+    showMessage("DB-Fehler (Exception)", String(e));
+  }
+};
+
 useEffect(() => {
   loadWeeklyRules();
 }, []);
 
 // ======= AUTO REFRESH ALLE 5 SEKUNDEN =======
 useEffect(() => {
+  if (!sessionReady) return;
+
   const interval = setInterval(() => {
     loadBookingsForDate(currentDateKey);
     loadWeeklyRules();
-  }, 5000); // 5 Sekunden
+  }, 5000);
 
   return () => clearInterval(interval);
-}, [currentDateKey]);
+}, [currentDateKey, sessionReady]);
 
-  useEffect(() => {
-    loadBookingsForDate(currentDateKey);
-  }, [currentDateKey]);
+useEffect(() => {
+  if (!sessionReady) return;
+  loadBookingsForDate(currentDateKey);
+}, [currentDateKey, sessionReady]);
+
 
   // -------- weekly_blocks laden --------
   const loadWeeklyRules = async () => {
