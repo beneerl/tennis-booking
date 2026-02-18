@@ -1,7 +1,39 @@
+// supabaseClient.js
 import { createClient } from "@supabase/supabase-js";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
 
-// HIER deine Daten aus dem Supabase-Dashboard eintragen:
 const SUPABASE_URL = "https://ywaqcttqnzvmxecbyuwr.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_nLr6Gl_UzyweWKnMgidzHw_995jmUKY";
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// Storage-Adapter für Supabase
+const webStorage = {
+  getItem: (key) => {
+    try {
+      return window?.localStorage?.getItem(key) ?? null;
+    } catch {
+      return null;
+    }
+  },
+  setItem: (key, value) => {
+    try {
+      window?.localStorage?.setItem(key, value);
+    } catch {}
+  },
+  removeItem: (key) => {
+    try {
+      window?.localStorage?.removeItem(key);
+    } catch {}
+  },
+};
+
+const storage = Platform.OS === "web" ? webStorage : AsyncStorage;
+
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+  auth: {
+    storage,
+    persistSession: true,
+    autoRefreshToken: true,
+    detectSessionInUrl: Platform.OS === "web", // Web/PWA braucht das
+  },
+});
