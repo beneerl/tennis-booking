@@ -251,8 +251,9 @@ export default function LKScreen({ route }) {
 
       // ✅ userId holen (für eindeutigen Upsert)
       try {
-        const { data } = await supabase.auth.getUser();
-        setUserId(data?.user?.id || null);
+const { data: sessionData } = await supabase.auth.getSession();
+setUserId(sessionData?.session?.user?.id || null);
+
       } catch {
         setUserId(null);
       }
@@ -279,6 +280,13 @@ export default function LKScreen({ route }) {
     if (!loading) loadLeaderboard();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
+  
+useEffect(() => {
+  const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    setUserId(session?.user?.id || null);
+  });
+  return () => sub?.subscription?.unsubscribe?.();
+}, []);
 
   // ✅ Opt-in geändert => Profil einmal hochschreiben (mit aktueller LK aus Textfeld)
   useEffect(() => {
