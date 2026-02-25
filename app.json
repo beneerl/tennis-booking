@@ -2,7 +2,7 @@
   "expo": {
     "name": "Tennis Tacherting",
     "slug": "tennis-booking",
-    "version": "1.0.0",
+    "version": "8.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -30,16 +30,18 @@
         "backgroundColor": "#001738"
       }
     },
-    "web": {
+"web": {
   "bundler": "metro",
   "favicon": "./assets/icon.png",
   "name": "Tennis Tacherting",
   "shortName": "T Tennis",
   "themeColor": "#001738",
   "backgroundColor": "#001738",
-  "display": "standalone"
-}
-,
+  "display": "standalone",
+  "viewport": "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+},
+
+
     "extra": {
       "eas": {
         "projectId": "b23dac64-f3dc-44d4-bf94-79cd09c7d26f"

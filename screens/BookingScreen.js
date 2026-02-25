@@ -15,6 +15,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabaseClient";
 
 const SLOT_DURATION_HOURS = 0.5;
+const SLOT_ROW_HEIGHT = 74; // geschätzte Höhe pro Zeitzeile inkl. Abstand
 
 const generateTimeSlots = () => {
   const slots = [];
@@ -65,7 +66,18 @@ function showMessage(title, message) {
     Alert.alert(title, message);
   }
 }
+function isSameCalendarDay(a, b) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
 
+function timeToMinutes(hhmm) {
+  const [h, m] = String(hhmm).split(":").map(Number);
+  return h * 60 + m;
+}
 
 export default function BookingScreen({ route, navigation }) {
   const params = route?.params || {};
@@ -88,6 +100,9 @@ export default function BookingScreen({ route, navigation }) {
   const [selectedEndTime, setSelectedEndTime] = useState(null);
   const [coPlayerNameInput, setCoPlayerNameInput] = useState("");
 const pendingDeleteRef = useRef(new Set()); // merkt sich Slots, die gerade gelöscht werden
+const gridScrollRef = useRef(null);
+const [nowTick, setNowTick] = useState(Date.now());
+const [didAutoScrollToday, setDidAutoScrollToday] = useState(false);
 
   const formatDate = (d) =>
     d.toLocaleDateString("de-DE", {
@@ -105,6 +120,34 @@ const pendingDeleteRef = useRef(new Set()); // merkt sich Slots, die gerade gel�
 
   const currentDateKey = getDateKey(date);
   const currentWeekday = date.getDay();
+  const isTodaySelected = isSameCalendarDay(date, new Date());
+
+const now = new Date(nowTick);
+const nowMinutes = now.getHours() * 60 + now.getMinutes();
+
+const firstSlotMinutes = timeToMinutes(TIME_SLOTS[0]); // 08:00
+const lastVisibleEndMinutes = timeToMinutes(TIME_SLOTS[TIME_SLOTS.length - 1]) + 30; // 21:00
+
+const showNowLine =
+  isTodaySelected &&
+  nowMinutes >= firstSlotMinutes &&
+  nowMinutes <= lastVisibleEndMinutes;
+
+// Position der "Jetzt"-Linie innerhalb des Grids (in px)
+const nowLineTop = (() => {
+  if (!showNowLine) return null;
+  const minutesFromStart = nowMinutes - firstSlotMinutes;
+  const rowsFromStart = minutesFromStart / 30; // jede Zeile = 30 Min
+  return rowsFromStart * SLOT_ROW_HEIGHT;
+})();
+
+// Slot ist vorbei? (nur heute)
+const isPastSlot = (time) => {
+  if (!isTodaySelected) return false;
+  const slotStart = timeToMinutes(time);
+  const slotEnd = slotStart + 30;
+  return slotEnd <= nowMinutes;
+};
 useEffect(() => {
   let sub = null;
 
@@ -140,6 +183,14 @@ useEffect(() => {
       sub?.unsubscribe?.();
     } catch {}
   };
+}, []);
+
+useEffect(() => {
+  const interval = setInterval(() => {
+    setNowTick(Date.now());
+  }, 60 * 1000); // jede Minute aktualisieren
+
+  return () => clearInterval(interval);
 }, []);
 
   // -------- Max-Stunden aus AsyncStorage laden --------
@@ -284,6 +335,33 @@ useEffect(() => {
   useEffect(() => {
     loadWeeklyRules();
   }, []);
+
+  useEffect(() => {
+  // Nur wenn "heute" ausgewählt ist
+  if (!isTodaySelected) {
+    setDidAutoScrollToday(false);
+    return;
+  }
+
+  // Nur einmal pro Tagesansicht auto-scrollen
+  if (didAutoScrollToday) return;
+
+  // Nur wenn Linie sichtbar ist
+  if (!showNowLine || nowLineTop == null) return;
+
+  // kleines Delay, damit ScrollView sicher gerendert ist
+  const t = setTimeout(() => {
+    try {
+      const y = Math.max(0, nowLineTop - 140); // etwas oberhalb der aktuellen Zeit landen
+      gridScrollRef.current?.scrollTo?.({ y, animated: true });
+      setDidAutoScrollToday(true);
+    } catch (e) {
+      console.log("auto-scroll error:", e);
+    }
+  }, 250);
+
+  return () => clearTimeout(t);
+}, [isTodaySelected, didAutoScrollToday, showNowLine, nowLineTop, currentDateKey]);
 
   // -------- Hilfsfunktionen Sperren/Buchungen --------
   const getManualBlock = (courtIndex, time) => {
@@ -432,6 +510,12 @@ const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName)
     const existing = bookings.find((b) => b.id === id);
     const courtName = COURTS[courtIndex];
     const dateLabel = formatDate(date);
+    const past = isPastSlot(time);
+
+if (past && !isAdmin) {
+  showMessage("Vergangen", "Diese Uhrzeit ist bereits vergangen.");
+  return;
+}
 
     // 1) bestehende Buchung -> löschen
     if (existing) {
@@ -653,63 +737,84 @@ const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName)
         ))}
       </View>
 
-      {/* Grid */}
-      <ScrollView contentContainerStyle={styles.gridContainer}>
-        {TIME_SLOTS.map((time) => (
-          <View key={time} style={styles.row}>
-            {COURTS.map((_, courtIndex) => {
-              const blocked = isBlocked(courtIndex, time);
-              const manualBlocked = isManuallyBlocked(courtIndex, time);
-              const booked = isBooked(courtIndex, time);
-              const booking = getBookingForSlot(courtIndex, time);
-              const autoRule = getAutoRuleForSlot(courtIndex, time);
+{/* Grid */}
+<ScrollView
+  ref={gridScrollRef}
+  contentContainerStyle={styles.gridContainer}
+>
+  <View style={styles.gridInner}>
+    {/* Jetzt-Linie (nur heute, nur im Zeitbereich) */}
+    {showNowLine && nowLineTop != null && (
+      <View
+        pointerEvents="none"
+        style={[styles.nowLineWrap, { top: nowLineTop }]}
+      >
+        <View style={styles.nowLine} />
+      </View>
+    )}
 
-              return (
-                <TouchableOpacity
-                  key={`${courtIndex}-${time}`}
-                  style={[
-                    styles.slotCell,
-                    blocked && styles.slotCellBlocked,
-                    booked && styles.slotCellBooked,
-                  ]}
-                  onPress={() => handleSlotPress(courtIndex, time)}
-                  onLongPress={() => {
-                    if (!isAdmin) return;
-                    if (!isAutomaticallyBlocked(courtIndex, time)) {
-                      toggleManualBlocked(courtIndex, time);
-                    }
-                  }}
-                  delayLongPress={300}
-                >
-                  <Text
-                    style={[
-                      styles.slotText,
-                      (booked || blocked) && styles.slotTextEmphasis,
-                    ]}
-                  >
-                    {time}
-                  </Text>
-                  {booking && (
-                    <Text style={styles.bookingNameText}>
-                      {booking.userName}
-                      {booking.coPlayerName
-                        ? ` / ${booking.coPlayerName}`
-                        : ""}
-                  </Text>
-                  )}
-                  {blocked && !booked && (
-                    <Text style={styles.blockedLabel}>
-                      {manualBlocked
-                        ? "GESPERRT"
-                        : autoRule?.reason || "AUTO"}
-                    </Text>
-                  )}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ))}
-      </ScrollView>
+    {TIME_SLOTS.map((time) => (
+      <View key={time} style={styles.row}>
+        {COURTS.map((_, courtIndex) => {
+          const blocked = isBlocked(courtIndex, time);
+          const manualBlocked = isManuallyBlocked(courtIndex, time);
+          const booked = isBooked(courtIndex, time);
+          const booking = getBookingForSlot(courtIndex, time);
+          const autoRule = getAutoRuleForSlot(courtIndex, time);
+
+          const past = isPastSlot(time);
+
+          return (
+            <TouchableOpacity
+              key={`${courtIndex}-${time}`}
+              style={[
+                styles.slotCell,
+                blocked && styles.slotCellBlocked,
+                booked && styles.slotCellBooked,
+
+                // ✅ Past-Slot optisch abdunkeln (nur heute)
+                past && styles.slotCellPast,
+              ]}
+              onPress={() => handleSlotPress(courtIndex, time)}
+              onLongPress={() => {
+                if (!isAdmin) return;
+                if (!isAutomaticallyBlocked(courtIndex, time)) {
+                  toggleManualBlocked(courtIndex, time);
+                }
+              }}
+              delayLongPress={300}
+            >
+              <Text
+                style={[
+                  styles.slotText,
+                  (booked || blocked) && styles.slotTextEmphasis,
+
+                  // ✅ Text leicht ausgrauen, aber nicht wenn gebucht (dann bleibt lesbar)
+                  past && !booked && styles.slotTextPast,
+                ]}
+              >
+                {time}
+              </Text>
+
+              {booking && (
+                <Text style={styles.bookingNameText}>
+                  {booking.userName}
+                  {booking.coPlayerName ? ` / ${booking.coPlayerName}` : ""}
+                </Text>
+              )}
+
+              {blocked && !booked && (
+                <Text style={styles.blockedLabel}>
+                  {manualBlocked ? "GESPERRT" : autoRule?.reason || "AUTO"}
+                </Text>
+              )}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    ))}
+  </View>
+</ScrollView>
 
       {/* Modal für Von/Bis + Mitspieler */}
       {bookingModalVisible && pendingSlot && (
@@ -908,6 +1013,33 @@ teamsIcon: {
     fontWeight: "700",
     marginTop: 3,
   },
+  gridInner: {
+  position: "relative",
+},
+
+slotCellPast: {
+  opacity: 0.5,
+},
+
+slotTextPast: {
+  color: "#b8c2d3",
+},
+
+nowLineWrap: {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  zIndex: 20,
+  pointerEvents: "none",
+},
+
+nowLine: {
+  height: 2,
+  backgroundColor: "#f28b25",
+  borderRadius: 2,
+  marginHorizontal: 4, // passt optisch zu den slot margins
+  opacity: 0.95,
+},
   blockedLabel: {
     color: "#ffffff",
     fontSize: 12,
