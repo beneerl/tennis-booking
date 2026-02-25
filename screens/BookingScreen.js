@@ -291,9 +291,6 @@ if (!s?.session?.user?.id) {
   }
 };
 
-useEffect(() => {
-  loadWeeklyRules();
-}, []);
 
 // ======= AUTO REFRESH ALLE 5 SEKUNDEN =======
 useEffect(() => {
@@ -769,13 +766,11 @@ if (past && !isAdmin) {
           const booked = isBooked(courtIndex, time);
           const booking = getBookingForSlot(courtIndex, time);
           const autoRule = getAutoRuleForSlot(courtIndex, time);
-            const slotMinutes = timeToMinutes(time);
-  const isPastSlot =
-    isPastDaySelected || (isTodaySelected && slotMinutes < nowMinutes);
+const slotMinutes = timeToMinutes(time);
+const isPastSlotRow =
+  isPastDaySelected || (isTodaySelected && slotMinutes < nowMinutes);
 
-      
-
-          const past = isPastSlot(time);
+const past = isPastSlot(time); // nutzt die FUNKTION von oben
 
           return (
             <TouchableOpacity
@@ -1034,10 +1029,6 @@ teamsIcon: {
   },
   gridInner: {
   position: "relative",
-},
-
-slotCellPast: {
-  opacity: 0.5,
 },
 
 slotTextPast: {
