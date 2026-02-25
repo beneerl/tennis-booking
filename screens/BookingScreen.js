@@ -773,15 +773,17 @@ const past = isPastDaySelected || isPastSlot(time);
           return (
             <TouchableOpacity
               key={`${courtIndex}-${time}`}
-              style={[
-                styles.slotCell,
-                isPastSlot && styles.slotCellPast,
-                blocked && styles.slotCellBlocked,
-                booked && styles.slotCellBooked,
+style={[
+  styles.slotCell,
+  // Vergangenheit nur bei NICHT gebuchten Slots stark ausgrauen
+  past && !booked && styles.slotCellPast,
 
-                // ✅ Past-Slot optisch abdunkeln (nur heute)
-                past && styles.slotCellPast,
-              ]}
+  blocked && styles.slotCellBlocked,
+  booked && styles.slotCellBooked,
+
+  // Optional: vergangene Buchungen nur leicht abdunkeln (eigener Style)
+  past && booked && styles.slotCellBookedPast,
+]}
               onPress={() => handleSlotPress(courtIndex, time)}
               onLongPress={() => {
                 if (!isAdmin) return;
@@ -791,17 +793,15 @@ const past = isPastDaySelected || isPastSlot(time);
               }}
               delayLongPress={300}
             >
-              <Text
-                style={[
-                  styles.slotText,
-                  (booked || blocked) && styles.slotTextEmphasis,
-
-                  // ✅ Text leicht ausgrauen, aber nicht wenn gebucht (dann bleibt lesbar)
-                  past && !booked && styles.slotTextPast,
-                ]}
-              >
-                {time}
-              </Text>
+<Text
+  style={[
+    styles.slotText,
+    (booked || blocked) && styles.slotTextEmphasis,
+    past && !booked && styles.slotTextPast,
+  ]}
+>
+  {time}
+</Text>
 
               {booking && (
                 <Text style={styles.bookingNameText}>
@@ -919,10 +919,13 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#f28b25",
   },
-  slotCellPast: {
-  opacity: 0.5,
+  slotCellBookedPast: {
+  opacity: 0.9, // nur leicht, damit man die Buchung noch klar erkennt
+},
+slotCellPast: {
+  backgroundColor: "rgba(8, 25, 55, 0.45)", // dunkler als normal
   borderColor: "#123055",
-  backgroundColor: "rgba(8, 25, 55, 0.7)",
+  opacity: 0.65,
 },
   adminBtnText: { color: "#001738", fontSize: 13, fontWeight: "700" },
   profileBtn: {
@@ -1029,10 +1032,11 @@ teamsIcon: {
   position: "relative",
 },
 
-slotTextPast: {
-  color: "#b8c2d3",
+slotCellPast: {
+  backgroundColor: "rgba(8, 25, 55, 0.45)", // dunkler als normal
+  borderColor: "#123055",
+  opacity: 0.65,
 },
-
 nowLineWrap: {
   position: "absolute",
   left: 0,
