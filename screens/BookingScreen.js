@@ -766,11 +766,9 @@ if (past && !isAdmin) {
           const booked = isBooked(courtIndex, time);
           const booking = getBookingForSlot(courtIndex, time);
           const autoRule = getAutoRuleForSlot(courtIndex, time);
-const slotMinutes = timeToMinutes(time);
-const isPastSlotRow =
-  isPastDaySelected || (isTodaySelected && slotMinutes < nowMinutes);
+const past = isPastDaySelected || isPastSlot(time);
 
-const past = isPastSlot(time); // nutzt die FUNKTION von oben
+
 
           return (
             <TouchableOpacity
