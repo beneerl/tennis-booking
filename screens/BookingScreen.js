@@ -121,6 +121,14 @@ const [didAutoScrollToday, setDidAutoScrollToday] = useState(false);
   const currentDateKey = getDateKey(date);
   const currentWeekday = date.getDay();
   const isTodaySelected = isSameCalendarDay(date, new Date());
+  const today = new Date();
+today.setHours(0, 0, 0, 0);
+
+const selectedDay = new Date(date);
+selectedDay.setHours(0, 0, 0, 0);
+
+const isPastDaySelected = selectedDay.getTime() < today.getTime();
+const isFutureDaySelected = selectedDay.getTime() > today.getTime();
 
 const now = new Date(nowTick);
 const nowMinutes = now.getHours() * 60 + now.getMinutes();
@@ -761,6 +769,11 @@ if (past && !isAdmin) {
           const booked = isBooked(courtIndex, time);
           const booking = getBookingForSlot(courtIndex, time);
           const autoRule = getAutoRuleForSlot(courtIndex, time);
+            const slotMinutes = timeToMinutes(time);
+  const isPastSlot =
+    isPastDaySelected || (isTodaySelected && slotMinutes < nowMinutes);
+
+      
 
           const past = isPastSlot(time);
 
@@ -769,6 +782,7 @@ if (past && !isAdmin) {
               key={`${courtIndex}-${time}`}
               style={[
                 styles.slotCell,
+                isPastSlot && styles.slotCellPast,
                 blocked && styles.slotCellBlocked,
                 booked && styles.slotCellBooked,
 
@@ -912,6 +926,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#f28b25",
   },
+  slotCellPast: {
+  opacity: 0.5,
+  borderColor: "#123055",
+  backgroundColor: "rgba(8, 25, 55, 0.7)",
+},
   adminBtnText: { color: "#001738", fontSize: 13, fontWeight: "700" },
   profileBtn: {
     paddingVertical: 5,
