@@ -103,6 +103,8 @@ const pendingDeleteRef = useRef(new Set()); // merkt sich Slots, die gerade gel�
 const gridScrollRef = useRef(null);
 const [nowTick, setNowTick] = useState(Date.now());
 const [didAutoScrollToday, setDidAutoScrollToday] = useState(false);
+const [rowLayouts, setRowLayouts] = useState({}); 
+// rowLayouts[time] = { y: number, h: number }
 
   const formatDate = (d) =>
     d.toLocaleDateString("de-DE", {
@@ -144,18 +146,42 @@ const showNowLine =
 // Position der "Jetzt"-Linie innerhalb des Grids (in px)
 const nowLineTop = (() => {
   if (!showNowLine) return null;
+
   const minutesFromStart = nowMinutes - firstSlotMinutes;
-  const rowsFromStart = minutesFromStart / 30; // jede Zeile = 30 Min
-  return rowsFromStart * SLOT_ROW_HEIGHT;
+  const rowIndex = Math.floor(minutesFromStart / 30);
+
+  // Sicherheits-Clamp
+  const safeIndex = Math.max(0, Math.min(TIME_SLOTS.length - 1, rowIndex));
+  const rowTime = TIME_SLOTS[safeIndex];
+
+  const layout = rowLayouts[rowTime];
+  if (!layout) return null; // noch nicht gemessen
+
+  const slotStartMinutes = firstSlotMinutes + safeIndex * 30;
+  const withinMinutes = nowMinutes - slotStartMinutes; // 0..29
+  const frac = Math.max(0, Math.min(1, withinMinutes / 30));
+
+  // Pixelgenau: y + Anteil der echten Row-Höhe
+  return layout.y + frac * layout.h;
 })();
 
 // Slot ist vorbei? (nur heute)
 const isPastSlot = (time) => {
   if (!isTodaySelected) return false;
   const slotStart = timeToMinutes(time);
-  const slotEnd = slotStart + 30;
-  return slotEnd <= nowMinutes;
+  // ✅ sobald "jetzt" nach Slot-Start ist, gilt der Slot als vergangen/grau
+  return nowMinutes > slotStart;
 };
+useEffect(() => {
+  // Wenn NICHT heute ausgewählt ist -> immer nach oben scrollen
+  if (!isTodaySelected) {
+    try {
+      gridScrollRef.current?.scrollTo?.({ y: 0, animated: false });
+    } catch {}
+    // wichtig: wenn du später wieder auf "heute" gehst, soll Auto-Scroll wieder gehen
+    setDidAutoScrollToday(false);
+  }
+}, [currentDateKey, isTodaySelected]);
 useEffect(() => {
   let sub = null;
 
@@ -747,80 +773,90 @@ if (past && !isAdmin) {
   ref={gridScrollRef}
   contentContainerStyle={styles.gridContainer}
 >
-  <View style={styles.gridInner}>
-    {/* Jetzt-Linie (nur heute, nur im Zeitbereich) */}
-    {showNowLine && nowLineTop != null && (
+<View style={styles.gridInner}>
+  {/* ✅ Wenn ein vergangener Tag ausgewählt ist: alles grau */}
+  {isPastDaySelected && (
+    <View pointerEvents="none" style={styles.pastShadeFull} />
+  )}
+
+  {/* ✅ Heute: nur bis zur orange Linie grau */}
+  {showNowLine && nowLineTop != null && (
+    <>
       <View
         pointerEvents="none"
-        style={[styles.nowLineWrap, { top: nowLineTop }]}
-      >
+        style={[styles.pastShadePartial, { height: nowLineTop }]}
+      />
+
+      <View pointerEvents="none" style={[styles.nowLineWrap, { top: nowLineTop }]}>
         <View style={styles.nowLine} />
       </View>
-    )}
+    </>
+  )}
 
-    {TIME_SLOTS.map((time) => (
-      <View key={time} style={styles.row}>
-        {COURTS.map((_, courtIndex) => {
-          const blocked = isBlocked(courtIndex, time);
-          const manualBlocked = isManuallyBlocked(courtIndex, time);
-          const booked = isBooked(courtIndex, time);
-          const booking = getBookingForSlot(courtIndex, time);
-          const autoRule = getAutoRuleForSlot(courtIndex, time);
-const past = isPastDaySelected || isPastSlot(time);
+{TIME_SLOTS.map((time) => (
+  <View
+    key={time}
+    style={styles.row}
+    onLayout={(e) => {
+      const { y, height } = e.nativeEvent.layout;
+      setRowLayouts((prev) => {
+        const old = prev[time];
+        if (old && old.y === y && old.h === height) return prev;
+        return { ...prev, [time]: { y, h: height } };
+      });
+    }}
+  >
+    {COURTS.map((_, courtIndex) => {
+      const blocked = isBlocked(courtIndex, time);
+      const manualBlocked = isManuallyBlocked(courtIndex, time);
+      const booked = isBooked(courtIndex, time);
+      const booking = getBookingForSlot(courtIndex, time);
+      const autoRule = getAutoRuleForSlot(courtIndex, time);
 
+      return (
+        <TouchableOpacity
+          key={`${courtIndex}-${time}`}
+          style={[
+            styles.slotCell,
+            blocked && styles.slotCellBlocked,
+            booked && styles.slotCellBooked,
+          ]}
+          onPress={() => handleSlotPress(courtIndex, time)}
+          onLongPress={() => {
+            if (!isAdmin) return;
+            if (!isAutomaticallyBlocked(courtIndex, time)) {
+              toggleManualBlocked(courtIndex, time);
+            }
+          }}
+          delayLongPress={300}
+        >
+          <Text
+            style={[
+              styles.slotText,
+              (booked || blocked) && styles.slotTextEmphasis,
+            ]}
+          >
+            {time}
+          </Text>
 
+          {booking && (
+            <Text style={styles.bookingNameText} numberOfLines={1}>
+              {booking.userName}
+              {booking.coPlayerName ? ` / ${booking.coPlayerName}` : ""}
+            </Text>
+          )}
 
-          return (
-            <TouchableOpacity
-              key={`${courtIndex}-${time}`}
-style={[
-  styles.slotCell,
-  // Vergangenheit nur bei NICHT gebuchten Slots stark ausgrauen
-  past && !booked && styles.slotCellPast,
-
-  blocked && styles.slotCellBlocked,
-  booked && styles.slotCellBooked,
-
-  // Optional: vergangene Buchungen nur leicht abdunkeln (eigener Style)
-  past && booked && styles.slotCellBookedPast,
-]}
-              onPress={() => handleSlotPress(courtIndex, time)}
-              onLongPress={() => {
-                if (!isAdmin) return;
-                if (!isAutomaticallyBlocked(courtIndex, time)) {
-                  toggleManualBlocked(courtIndex, time);
-                }
-              }}
-              delayLongPress={300}
-            >
-<Text
-  style={[
-    styles.slotText,
-    (booked || blocked) && styles.slotTextEmphasis,
-    past && !booked && styles.slotTextPast,
-  ]}
->
-  {time}
-</Text>
-
-              {booking && (
-                <Text style={styles.bookingNameText}>
-                  {booking.userName}
-                  {booking.coPlayerName ? ` / ${booking.coPlayerName}` : ""}
-                </Text>
-              )}
-
-              {blocked && !booked && (
-                <Text style={styles.blockedLabel}>
-                  {manualBlocked ? "GESPERRT" : autoRule?.reason || "AUTO"}
-                </Text>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    ))}
+          {blocked && !booked && (
+            <Text style={styles.blockedLabel}>
+              {manualBlocked ? "GESPERRT" : autoRule?.reason || "AUTO"}
+            </Text>
+          )}
+        </TouchableOpacity>
+      );
+    })}
   </View>
+))}
+</View>
 </ScrollView>
 
       {/* Modal für Von/Bis + Mitspieler */}
@@ -919,14 +955,26 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "#f28b25",
   },
-  slotCellBookedPast: {
-  opacity: 0.9, // nur leicht, damit man die Buchung noch klar erkennt
+  pastShadePartial: {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  top: 0,
+  zIndex: 5,
+  backgroundColor: "rgba(0,0,0,0.22)",
 },
-slotCellPast: {
-  backgroundColor: "rgba(8, 25, 55, 0.45)", // dunkler als normal
-  borderColor: "#123055",
-  opacity: 0.65,
+
+pastShadeFull: {
+  position: "absolute",
+  left: 0,
+  right: 0,
+  top: 0,
+  bottom: 0,
+  zIndex: 5,
+  backgroundColor: "rgba(0,0,0,0.22)",
 },
+
+
   adminBtnText: { color: "#001738", fontSize: 13, fontWeight: "700" },
   profileBtn: {
     paddingVertical: 5,
@@ -1020,7 +1068,7 @@ teamsIcon: {
     backgroundColor: "rgba(80, 80, 90, 0.95)",
     borderColor: "#999999",
   },
-  slotText: { color: "#ffffff", fontSize: 14 },
+  slotText: { color: "#ffffff", fontSize: 14, zIndex: 2 },
   slotTextEmphasis: { fontWeight: "700" },
   bookingNameText: {
     color: "#001738",
@@ -1032,16 +1080,12 @@ teamsIcon: {
   position: "relative",
 },
 
-slotCellPast: {
-  backgroundColor: "rgba(8, 25, 55, 0.45)", // dunkler als normal
-  borderColor: "#123055",
-  opacity: 0.65,
-},
+
 nowLineWrap: {
   position: "absolute",
   left: 0,
   right: 0,
-  zIndex: 20,
+  zIndex: 20, // ✅ niedrig
   pointerEvents: "none",
 },
 
