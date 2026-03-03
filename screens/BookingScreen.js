@@ -1079,7 +1079,17 @@ teamsIcon: {
   gridInner: {
   position: "relative",
 },
-
+slotCellPast: {
+  backgroundColor: "rgba(0,0,0,0.28)",   // dunkler Overlay-Look
+  borderColor: "rgba(255,255,255,0.08)",
+  opacity: 0.90,
+},
+slotTextPast: {
+  color: "rgba(255,255,255,0.55)",
+},
+slotCellBookedPast: {
+  opacity: 0.78, // gebuchte vergangene Slots leicht dimmen, aber gut sichtbar
+},
 
 nowLineWrap: {
   position: "absolute",
