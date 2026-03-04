@@ -140,8 +140,7 @@ const lastVisibleEndMinutes = timeToMinutes(TIME_SLOTS[TIME_SLOTS.length - 1]) +
 
 const showNowLine =
   isTodaySelected &&
-  nowMinutes >= firstSlotMinutes &&
-  nowMinutes <= lastVisibleEndMinutes;
+  nowMinutes >= firstSlotMinutes; // ✅ bleibt auch nach 21:00 Uhr sichtbar
 
 // Position der "Jetzt"-Linie innerhalb des Grids (in px)
 const nowLineTop = (() => {
@@ -747,7 +746,7 @@ if (past && !isAdmin) {
 
 
       {/* Datum + Pfeile */}
-      <View style={styles.subHeader}>
+      <View style={[styles.subHeader, isTodaySelected && styles.subHeaderToday]}>
         <TouchableOpacity onPress={() => changeDate(-1)} style={styles.arrow}>
           <Text style={styles.arrowText}>{"<"}</Text>
         </TouchableOpacity>
@@ -1002,6 +1001,11 @@ lkBtn: {
 },
 lkIcon: {
   fontSize: 16,
+},
+subHeaderToday: {
+  borderBottomWidth: 2,
+  borderBottomColor: "#f28b25",
+  backgroundColor: "#00265f", // minimal heller als #001e4f
 },
 
 teamsIcon: {
