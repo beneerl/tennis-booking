@@ -311,9 +311,19 @@ if (!s?.session?.user?.id) {
     // (Optional) Debug
     console.log(`Bookings loaded for ${dateKey}:`, filtered.length);
   } catch (e) {
-    console.log("Supabase load exception:", e);
-    showMessage("DB-Fehler (Exception)", String(e));
+  const msg = String(e?.message || e);
+
+  // ✅ Web/PWA: nach Resume kommt manchmal kurz "Failed to fetch"
+  // -> kein Popup, sondern stiller Retry
+  if (msg.toLowerCase().includes("failed to fetch")) {
+    console.log("Transient fetch error, retrying...", msg);
+    setTimeout(() => loadBookingsForDate(dateKey), 800);
+    return;
   }
+
+  console.log("Supabase load exception:", e);
+  showMessage("DB-Fehler (Exception)", msg);
+}
 };
 
 
@@ -334,6 +344,36 @@ useEffect(() => {
   loadBookingsForDate(currentDateKey);
 }, [currentDateKey, sessionReady]);
 
+// ✅ Web/PWA Resume-Fix (iOS Home-Screen + Android Web)
+useEffect(() => {
+  if (Platform.OS !== "web") return;
+
+  const onResume = async () => {
+    // kleiner Delay nach Unlock/Tab-Wechsel
+    setTimeout(async () => {
+      try {
+        await supabase.auth.refreshSession();
+      } catch {}
+
+      loadBookingsForDate(currentDateKey);
+      loadWeeklyRules();
+    }, 600);
+  };
+
+  const onVisibility = () => {
+    if (document.visibilityState === "visible") onResume();
+  };
+
+  window.addEventListener("focus", onResume);
+  window.addEventListener("online", onResume);
+  document.addEventListener("visibilitychange", onVisibility);
+
+  return () => {
+    window.removeEventListener("focus", onResume);
+    window.removeEventListener("online", onResume);
+    document.removeEventListener("visibilitychange", onVisibility);
+  };
+}, [currentDateKey]);
 
   // -------- weekly_blocks laden --------
   const loadWeeklyRules = async () => {
@@ -357,9 +397,15 @@ useEffect(() => {
 
       setWeeklyRules(mapped);
     } catch (e) {
-      console.log("weekly_blocks load exception:", e);
-      Alert.alert("DB-Fehler (weekly_blocks Exception)", String(e));
-    }
+  const msg = String(e?.message || e);
+  if (msg.toLowerCase().includes("failed to fetch")) {
+    console.log("Transient weekly_rules fetch error, retrying...", msg);
+    setTimeout(() => loadWeeklyRules(), 800);
+    return;
+  }
+  console.log("weekly_blocks load exception:", e);
+  showMessage("DB-Fehler (weekly_blocks Exception)", msg);
+}
   };
 
   useEffect(() => {
