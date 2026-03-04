@@ -895,66 +895,70 @@ if (past && !isAdmin) {
       });
     }}
   >
-    {COURTS.map((_, courtIndex) => {
-      const blocked = isBlocked(courtIndex, time);
-      const manualBlocked = isManuallyBlocked(courtIndex, time);
-      const booked = isBooked(courtIndex, time);
-      const booking = getBookingForSlot(courtIndex, time);
-      const autoRule = getAutoRuleForSlot(courtIndex, time);
-      const closed = isCourtClosed(courtIndex);
+{COURTS.map((_, courtIndex) => {
+  const blocked = isBlocked(courtIndex, time);
+  const manualBlocked = isManuallyBlocked(courtIndex, time);
+  const booked = isBooked(courtIndex, time);
+  const booking = getBookingForSlot(courtIndex, time);
+  const autoRule = getAutoRuleForSlot(courtIndex, time);
 
-      return (
-        <TouchableOpacity
-          key={`${courtIndex}-${time}`}
-          style={[
-  styles.slotCell,
+  const closed = isCourtClosed(courtIndex); // ✅ das verwenden wir
+  // const courtLocked = isCourtPermanentlyBlocked(courtIndex); // ❌ aktuell unbenutzt -> auskommentieren oder löschen
 
-  // ✅ Platz dauerhaft gesperrt -> Vorhang-Look
-  closed && styles.slotCellCourtClosed,
+  return (
+    <TouchableOpacity
+      key={`${courtIndex}-${time}`}
+      style={[
+        styles.slotCell,
 
-  // ✅ Weekly/Manual Sperre nur, wenn Platz NICHT dauerhaft gesperrt ist
-  !closed && blocked && styles.slotCellBlocked,
+        // ✅ Platz dauerhaft gesperrt -> Vorhang-Look
+        closed && styles.slotCellCourtClosed,
 
-  // ✅ Buchung bleibt Buchung
-  booked && styles.slotCellBooked,
-]}
-          onPress={() => handleSlotPress(courtIndex, time)}
-          onLongPress={() => {
-            if (!isAdmin) return;
-            if (!isAutomaticallyBlocked(courtIndex, time)) {
-              toggleManualBlocked(courtIndex, time);
-            }
-          }}
-          delayLongPress={300}
-        >
-          <Text
-            style={[
-              styles.slotText,
-              (booked || blocked) && styles.slotTextEmphasis,
-            ]}
-          >
-            {time}
-          </Text>
+        // ✅ Weekly/Manual Sperre nur wenn Platz NICHT dauerhaft gesperrt ist
+        !closed && blocked && styles.slotCellBlocked,
 
-          {booking && (
-            <Text style={styles.bookingNameText} numberOfLines={1}>
-              {booking.userName}
-              {booking.coPlayerName ? ` / ${booking.coPlayerName}` : ""}
-            </Text>
-          )}
+        // ✅ normale Buchung
+        booked && styles.slotCellBooked,
+      ]}
+      onPress={() => handleSlotPress(courtIndex, time)}
+      onLongPress={() => {
+        if (!isAdmin) return;
+        if (!isAutomaticallyBlocked(courtIndex, time)) {
+          toggleManualBlocked(courtIndex, time);
+        }
+      }}
+      delayLongPress={300}
+    >
+      {/* Uhrzeit immer mittig */}
+      <Text
+        style={[
+          styles.slotText,
+          (booked || blocked || closed) && styles.slotTextEmphasis,
+        ]}
+      >
+        {time}
+      </Text>
 
-       {closed && !booked && (
-  <Text style={styles.courtClosedLabel}>PLATZ GESPERRT</Text>
-)}
+      {/* dauerhaft gesperrt -> nur "GESPERRT" darunter */}
+      {closed && <Text style={styles.lockedSubText}>GESPERRT</Text>}
 
-{!closed && blocked && !booked && (
-  <Text style={styles.blockedLabel}>
-    {manualBlocked ? "GESPERRT" : autoRule?.reason || "AUTO"}
-  </Text>
-)}
-        </TouchableOpacity>
-      );
-    })}
+      {/* normale Buchung anzeigen (closed hat Vorrang) */}
+      {!closed && booking && (
+        <Text style={styles.bookingNameText}>
+          {booking.userName}
+          {booking.coPlayerName ? ` / ${booking.coPlayerName}` : ""}
+        </Text>
+      )}
+
+      {/* weekly/manual sperre label nur wenn nicht closed und nicht booked */}
+      {!closed && blocked && !booked && (
+        <Text style={styles.blockedLabel}>
+          {manualBlocked ? "GESPERRT" : autoRule?.reason || "AUTO"}
+        </Text>
+      )}
+    </TouchableOpacity>
+  );
+})}
   </View>
 ))}
 </View>
@@ -1062,7 +1066,7 @@ const styles = StyleSheet.create({
   right: 0,
   top: 0,
   zIndex: 5,
-  backgroundColor: "rgba(0,0,0,0.55)",
+  backgroundColor: "rgba(0,0,0,0.40)",
 },
 
 pastShadeFull: {
@@ -1072,7 +1076,7 @@ pastShadeFull: {
   top: 0,
   bottom: 0,
   zIndex: 5,
-  backgroundColor: "rgba(0,0,0,0.55)",
+  backgroundColor: "rgba(0,0,0,0.40)",
 },
 
 
@@ -1288,6 +1292,15 @@ courtClosedLabel: {
     borderColor: "#355a8a",
     marginBottom: 6,
   },
+
+  lockedSubText: {
+  marginTop: 6,
+  textAlign: "center",
+  color: "rgba(255,255,255,0.55)",
+  fontSize: 12,
+  fontWeight: "900",
+  letterSpacing: 1,
+},
   endTimeOptionActive: {
     backgroundColor: "#f28b25",
     borderColor: "#f28b25",
