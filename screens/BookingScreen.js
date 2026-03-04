@@ -79,6 +79,18 @@ function timeToMinutes(hhmm) {
   return h * 60 + m;
 }
 
+function isNetworkFetchError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+  return (
+    msg.includes("failed to fetch") ||
+    msg.includes("network request failed") ||
+    msg.includes("load failed") ||
+    msg.includes("networkerror")
+  );
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 export default function BookingScreen({ route, navigation }) {
   const params = route?.params || {};
   const userName = params.userName || "Gast";
@@ -87,7 +99,8 @@ export default function BookingScreen({ route, navigation }) {
   const [date, setDate] = useState(new Date());
   const [maxHoursPerDay, setMaxHoursPerDay] = useState(2);
   const [sessionReady, setSessionReady] = useState(false);
-
+const [isRetryingBookings, setIsRetryingBookings] = useState(false);
+const lastFetchWarnRef = useRef(0);
 
   const [bookings, setBookings] = useState([]);
   const [blockedSlots, setBlockedSlots] = useState([]);
@@ -104,6 +117,7 @@ const [courtClosureReason, setCourtClosureReason] = useState({ 0: "", 1: "", 2: 
   const [coPlayerNameInput, setCoPlayerNameInput] = useState("");
 const pendingDeleteRef = useRef(new Set()); // merkt sich Slots, die gerade gelöscht werden
 const gridScrollRef = useRef(null);
+const retryBookingsRef = useRef(false);
 const [nowTick, setNowTick] = useState(Date.now());
 const [didAutoScrollToday, setDidAutoScrollToday] = useState(false);
 const [rowLayouts, setRowLayouts] = useState({}); 
@@ -293,8 +307,9 @@ if (!s?.session?.user?.id) {
 
     if (error) {
       console.log("Supabase load error:", error.message);
-      showMessage("DB-Fehler (Buchungen laden)", error.message);
-      return;
+      // Supabase-Error (Policy/DB/etc.) -> echtes Problem => Popup ok
+showMessage("DB-Fehler (Buchungen laden)", error.message);
+return;
     }
 
     // 3) Mapping
@@ -313,19 +328,38 @@ if (!s?.session?.user?.id) {
 
     // (Optional) Debug
     console.log(`Bookings loaded for ${dateKey}:`, filtered.length);
-  } catch (e) {
+} catch (e) {
   const msg = String(e?.message || e);
+  const low = msg.toLowerCase();
 
-  // ✅ Web/PWA: nach Resume kommt manchmal kurz "Failed to fetch"
-  // -> kein Popup, sondern stiller Retry
-  if (msg.toLowerCase().includes("failed to fetch")) {
-    console.log("Transient fetch error, retrying...", msg);
-    setTimeout(() => loadBookingsForDate(dateKey), 800);
+  const isNet =
+    low.includes("failed to fetch") ||
+    low.includes("network request failed") ||
+    low.includes("load failed") ||
+    low.includes("networkerror");
+
+  // ✅ Netzwerk-Glitch nach Resume: kein Popup, sondern EIN Retry
+  if (isNet) {
+    console.log("Transient fetch error -> retry once...", msg);
+
+    // Anti-Loop: nur 1 Retry gleichzeitig erlauben
+    if (retryBookingsRef.current) return;
+    retryBookingsRef.current = true;
+
+    setTimeout(async () => {
+      try {
+        await loadBookingsForDate(dateKey);
+      } finally {
+        retryBookingsRef.current = false;
+      }
+    }, 900);
+
     return;
   }
 
+  // ❌ echte Fehler -> Popup
   console.log("Supabase load exception:", e);
-  showMessage("DB-Fehler (Exception)", msg);
+  showMessage("DB-Fehler (Buchungen laden)", msg);
 }
 };
 
