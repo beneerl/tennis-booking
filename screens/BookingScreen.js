@@ -93,6 +93,9 @@ export default function BookingScreen({ route, navigation }) {
   const [blockedSlots, setBlockedSlots] = useState([]);
   const [weeklyRules, setWeeklyRules] = useState([]);
 
+  const [courtClosures, setCourtClosures] = useState({ 0: false, 1: false, 2: false });
+const [courtClosureReason, setCourtClosureReason] = useState({ 0: "", 1: "", 2: "" });
+
   // Modal für „von–bis“ + Mitspieler
   const [bookingModalVisible, setBookingModalVisible] = useState(false);
   const [pendingSlot, setPendingSlot] = useState(null); // { courtIndex, startTime, isSingleSlot }
@@ -334,6 +337,7 @@ useEffect(() => {
   const interval = setInterval(() => {
     loadBookingsForDate(currentDateKey);
     loadWeeklyRules();
+    loadCourtClosures(); // ✅ NEU
   }, 5000);
 
   return () => clearInterval(interval);
@@ -342,6 +346,7 @@ useEffect(() => {
 useEffect(() => {
   if (!sessionReady) return;
   loadBookingsForDate(currentDateKey);
+  loadCourtClosures(); // ✅ NEU
 }, [currentDateKey, sessionReady]);
 
 // ✅ Web/PWA Resume-Fix (iOS Home-Screen + Android Web)
@@ -408,6 +413,32 @@ useEffect(() => {
 }
   };
 
+const loadCourtClosures = async () => {
+  try {
+    const { data, error } = await supabase
+      .from("court_closures")
+      .select("court_index, is_closed, reason");
+
+    if (error) {
+      console.log("court_closures load error:", error.message);
+      return;
+    }
+
+    const map = { 0: false, 1: false, 2: false };
+    const reasons = { 0: "", 1: "", 2: "" };
+
+    (data || []).forEach((r) => {
+      map[r.court_index] = !!r.is_closed;
+      reasons[r.court_index] = r.reason || "";
+    });
+
+    setCourtClosures(map);
+    setCourtClosureReason(reasons);
+  } catch (e) {
+    console.log("court_closures load exception:", String(e));
+  }
+};
+
   useEffect(() => {
     loadWeeklyRules();
   }, []);
@@ -459,9 +490,11 @@ useEffect(() => {
   const isAutomaticallyBlocked = (courtIndex, time) =>
     !!getAutoRuleForSlot(courtIndex, time);
 
-  const isBlocked = (courtIndex, time) =>
-    isManuallyBlocked(courtIndex, time) ||
-    isAutomaticallyBlocked(courtIndex, time);
+const isCourtClosed = (courtIndex) => !!courtClosures?.[courtIndex];
+
+const isBlocked = (courtIndex, time) =>
+  isManuallyBlocked(courtIndex, time) ||
+  isAutomaticallyBlocked(courtIndex, time);
 
   const toggleManualBlocked = (courtIndex, time) => {
     const id = `${courtIndex}-${time}-${currentDateKey}`;
@@ -582,6 +615,17 @@ const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName)
 
   // -------- Slot-Klick mit Von/Bis + Mitspieler --------
   const handleSlotPress = (courtIndex, time) => {
+    if (isCourtClosed(courtIndex)) {
+  showMessage(
+    "Platz gesperrt",
+    `Dieser Platz ist aktuell gesperrt.${
+      courtClosureReason?.[courtIndex]
+        ? `\n\nGrund: ${courtClosureReason[courtIndex]}`
+        : ""
+    }`
+  );
+  return;
+}
     const id = `${courtIndex}-${time}-${currentDateKey}`;
     const existing = bookings.find((b) => b.id === id);
     const courtName = COURTS[courtIndex];
@@ -857,15 +901,23 @@ if (past && !isAdmin) {
       const booked = isBooked(courtIndex, time);
       const booking = getBookingForSlot(courtIndex, time);
       const autoRule = getAutoRuleForSlot(courtIndex, time);
+      const closed = isCourtClosed(courtIndex);
 
       return (
         <TouchableOpacity
           key={`${courtIndex}-${time}`}
           style={[
-            styles.slotCell,
-            blocked && styles.slotCellBlocked,
-            booked && styles.slotCellBooked,
-          ]}
+  styles.slotCell,
+
+  // ✅ Platz dauerhaft gesperrt -> Vorhang-Look
+  closed && styles.slotCellCourtClosed,
+
+  // ✅ Weekly/Manual Sperre nur, wenn Platz NICHT dauerhaft gesperrt ist
+  !closed && blocked && styles.slotCellBlocked,
+
+  // ✅ Buchung bleibt Buchung
+  booked && styles.slotCellBooked,
+]}
           onPress={() => handleSlotPress(courtIndex, time)}
           onLongPress={() => {
             if (!isAdmin) return;
@@ -891,11 +943,15 @@ if (past && !isAdmin) {
             </Text>
           )}
 
-          {blocked && !booked && (
-            <Text style={styles.blockedLabel}>
-              {manualBlocked ? "GESPERRT" : autoRule?.reason || "AUTO"}
-            </Text>
-          )}
+       {closed && !booked && (
+  <Text style={styles.courtClosedLabel}>PLATZ GESPERRT</Text>
+)}
+
+{!closed && blocked && !booked && (
+  <Text style={styles.blockedLabel}>
+    {manualBlocked ? "GESPERRT" : autoRule?.reason || "AUTO"}
+  </Text>
+)}
         </TouchableOpacity>
       );
     })}
@@ -1006,7 +1062,7 @@ const styles = StyleSheet.create({
   right: 0,
   top: 0,
   zIndex: 5,
-  backgroundColor: "rgba(0,0,0,0.22)",
+  backgroundColor: "rgba(0,0,0,0.55)",
 },
 
 pastShadeFull: {
@@ -1016,7 +1072,7 @@ pastShadeFull: {
   top: 0,
   bottom: 0,
   zIndex: 5,
-  backgroundColor: "rgba(0,0,0,0.22)",
+  backgroundColor: "rgba(0,0,0,0.55)",
 },
 
 
@@ -1192,6 +1248,22 @@ nowLine: {
     fontWeight: "800",
     marginBottom: 8,
   },
+
+slotCellCourtClosed: {
+  backgroundColor: "rgba(0,0,0,0.75)",
+  borderColor: "rgba(242,139,37,0.35)",
+  borderWidth: 1.5,
+},
+
+courtClosedLabel: {
+  marginTop: 6,
+  textAlign: "center",
+  fontSize: 11,
+  fontWeight: "900",
+  color: "rgba(255,255,255,0.85)",
+  lineHeight: 14,
+},
+
   modalSubtitle: {
     color: "#c3d0ea",
     fontSize: 15,
@@ -1239,6 +1311,24 @@ nowLine: {
     fontSize: 14,
     marginBottom: 10,
   },
+
+slotCellCourtClosed: {
+  backgroundColor: "rgba(0,0,0,0.55)",
+  borderColor: "rgba(255,255,255,0.10)",
+},
+
+slotTextCourtClosed: {
+  color: "rgba(255,255,255,0.45)",
+},
+
+courtClosedLabel: {
+  marginTop: 4,
+  fontSize: 11,
+  fontWeight: "900",
+  color: "rgba(255,255,255,0.55)",
+  letterSpacing: 1,
+},
+
   modalButtonsRow: {
     flexDirection: "row",
     justifyContent: "flex-end",
