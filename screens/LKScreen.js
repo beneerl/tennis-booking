@@ -1,5 +1,5 @@
 // screens/LKScreen.js
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useRef } from "react";
 import {
   View,
   Text,
@@ -12,9 +12,11 @@ import {
   RefreshControl,
   ActivityIndicator,
 } from "react-native";
+
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
 import { supabase } from "../supabaseClient";
+
 
 const STORAGE_PROFILE = "lk_profile_v1";
 const STORAGE_HISTORY = "lk_history_v1";
@@ -133,9 +135,10 @@ export default function LKScreen({ route }) {
   const [currentLK, setCurrentLK] = useState(16.0);
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [useMotivation, setUseMotivation] = useState(false);
+  const [eggVisible, setEggVisible] = useState(false);
 
   // Komma-Eingabe sauber
-  const [currentLKText, setCurrentLKText] = useState("16,0");
+  const [currentLKText, setCurrentLKText] = useState("25,0");
 
   // ✅ Auth UserId (für eindeutigen Upsert)
   const [userId, setUserId] = useState(null);
@@ -270,6 +273,7 @@ setUserId(sessionData?.session?.user?.id || null);
     setCurrentLKText(fmt(round3(toNumber(currentLK) ?? 0)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
+
 
   useEffect(() => {
     if (loading) return;
@@ -747,6 +751,7 @@ useEffect(() => {
           </View>
         </View>
       )}
+
     </View>
   );
 }
@@ -859,6 +864,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     marginBottom: 10,
   },
+
+
+
   refreshBtn: {
     width: 44,
     height: 34,
