@@ -11,6 +11,7 @@ const TEAM_MAP = {
       "https://btv.liga.nu/cgi-bin/WebObjects/nuLigaDokumentTENDE.woa/wa/nuDokument?dokument=ScheduleReportFOP&group=2115082",
     season: "Winter 2025/2026",
     team: "Herren (Winter)",
+    parser: "winter"
   },
 
   // ✅ NEU: Herren Sommer I
@@ -20,6 +21,7 @@ const TEAM_MAP = {
       "https://btv.liga.nu/cgi-bin/WebObjects/nuLigaDokumentTENDE.woa/wa/nuDokument?dokument=ScheduleReportFOP&group=2215966",
     season: "Sommer 2026",
     team: "Herren I (Sommer)",
+    parser: "summer"
   },
 };
 
@@ -240,6 +242,68 @@ function parseMatchesRelaxed(text) {
   return matches;
 }
 
+function parseMatchesWinter(text) {
+  const strict = parseMatchesStrict(text);
+
+  // Wenn strict schon genug Spiele findet, passt es (Winter bleibt stabil)
+  if (strict && strict.length >= 6) return strict;
+
+  // Fallback: relaxed
+  const relaxed = parseMatchesRelaxed(text);
+
+  // Nimm die Variante, die mehr Matches liefert
+  if ((relaxed?.length || 0) > (strict?.length || 0)) return relaxed;
+
+  return strict || [];
+}
+
+function parseMatchesSummer(text) {
+  const lines = toLines(text);
+  const matches = [];
+
+  // Sommer-PDF ist oft „wilder“ -> wir scannen Zeilen nach Datum/Uhrzeit
+  const re =
+    /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)[,]?\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{1,2}[:.]\d{2})\s+(.*)$/;
+
+  for (const raw of lines) {
+    const line = String(raw || "");
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Halle/Spielort an letztes Match hängen
+    if (/^(halle|spielort):/i.test(trimmed) && matches.length) {
+      matches[matches.length - 1].halle = trimmed
+        .replace(/^(halle|spielort):\s*/i, "")
+        .trim();
+      continue;
+    }
+
+    const m = trimmed.match(re);
+    if (!m) continue;
+
+    const wochentag = m[1];
+    const datum = m[2];
+    const uhrzeit = m[3].replace(".", ":"); // 09.00 -> 09:00
+    const rest = m[4];
+
+    // Teams stehen meist als Spalten -> viele Leerzeichen
+    const parts = rest.split(/\s{2,}/).map((x) => x.trim()).filter(Boolean);
+
+    const heim = parts[0] || "";
+    const gast = parts[1] || "";
+
+    const scoreMatch = rest.match(/(\d+:\d+)/);
+    const erg = scoreMatch ? scoreMatch[1] : "";
+
+    // Nur Matches mit mind. Heim+Gast übernehmen
+    if (!heim || !gast) continue;
+
+    matches.push({ wochentag, datum, uhrzeit, heim, gast, erg });
+  }
+
+  return matches;
+}
+
 // dd.mm.yyyy + hh:mm => Date (lokal)
 function parseDEDateTime(datum, uhrzeit) {
   if (!datum || !uhrzeit) return null;
@@ -271,13 +335,10 @@ function computePlayedMatches(matches) {
 
 function buildPayload(teamId, cfg, text) {
   const table = parseRanking(text);
-  let matches = parseMatchesStrict(text);
-
-// Fallback nur wenn offensichtlich "zu wenig" erkannt wurde
-if (matches.length < 5) {
-  const relaxed = parseMatchesRelaxed(text);
-  if (relaxed.length > matches.length) matches = relaxed;
-}
+const matches =
+    cfg.parser === "summer"
+      ? parseMatchesSummer(text)
+      : parseMatchesWinter(text);
 
   const status = table.length || matches.length ? "ACTIVE" : "PENDING";
 
