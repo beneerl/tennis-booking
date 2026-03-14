@@ -12,7 +12,18 @@ const TEAM_MAP = {
     season: "Winter 2025/2026",
     team: "Herren (Winter)",
   },
+
+  // ✅ NEU: Herren Sommer I
+  herren_s1: {
+    team_id: "herren_s1",
+    pdf_url:
+      "https://btv.liga.nu/cgi-bin/WebObjects/nuLigaDokumentTENDE.woa/wa/nuDokument?dokument=ScheduleReportFOP&group=2215966",
+    season: "Sommer 2026",
+    team: "Herren I (Sommer)",
+  },
 };
+
+
 
 function ensurePdftotext() {
   try {
