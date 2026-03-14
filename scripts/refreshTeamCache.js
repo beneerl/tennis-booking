@@ -52,6 +52,7 @@ function pdfToText(pdfPath) {
 function toLines(text) {
   return text
     .split(/\r?\n/)
+    .map((l) => l.replace(/\u00a0/g, " ")) // NBSP -> space
     .map((l) => l.replace(/\t/g, " "))
     .map((l) => l.replace(/\s+$/g, "")); // rechts trim, links lassen (Spalten!)
 }
@@ -102,7 +103,7 @@ function parseRanking(text) {
 }
 
 // === Matches aus festen Spalten (Header-Positionen) ===
-function parseMatches(text) {
+function parseMatchesStrict(text) {
   const lines = toLines(text);
 
   const headerIdx = lines.findIndex((l) =>
@@ -172,6 +173,73 @@ function parseMatches(text) {
   return matches;
 }
 
+function parseMatchesRelaxed(text) {
+  const lines = toLines(text);
+
+  const headerIdx = lines.findIndex((l) =>
+    l.toLowerCase().includes("termin") &&
+    l.toLowerCase().includes("heimmannschaft") &&
+    l.toLowerCase().includes("gastmannschaft")
+  );
+  if (headerIdx === -1) return [];
+
+  const header = lines[headerIdx];
+
+  const terminStart = header.indexOf("Termin");
+  const heimStart = header.indexOf("Heimmannschaft");
+  const gastStart = header.indexOf("Gastmannschaft");
+
+  let ergStart = header.indexOf("Erg.");
+  if (ergStart === -1) ergStart = header.indexOf("Bem.");
+  if (terminStart === -1 || heimStart === -1 || gastStart === -1 || ergStart === -1) return [];
+
+  const matches = [];
+  const terminRegex =
+    /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)[,]?\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{1,2}[:.]\d{2})\s*$/;
+
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line) continue;
+
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // ✅ Halle / Spielort Zeilen anhängen
+    if (/^(halle|spielort):/i.test(trimmed) && matches.length) {
+      matches[matches.length - 1].halle = trimmed
+        .replace(/^(halle|spielort):\s*/i, "")
+        .trim();
+      continue;
+    }
+
+    const terminField = line.slice(terminStart, heimStart).trim();
+    const heimField = line.slice(heimStart, gastStart).trim();
+    const gastField = line.slice(gastStart, ergStart).trim();
+    const ergField = line.slice(ergStart).trim();
+
+    const tm = terminField.match(terminRegex);
+    if (!tm) continue;
+
+    const wochentag = tm[1];
+    const datum = tm[2];
+    const uhrzeit = tm[3].replace(".", ":"); // ✅ 09.00 -> 09:00
+
+    const scoreMatch = ergField.match(/(\d+:\d+)/);
+    const erg = scoreMatch ? scoreMatch[1] : "";
+
+    matches.push({
+      wochentag,
+      datum,
+      uhrzeit,
+      heim: heimField,
+      gast: gastField,
+      erg,
+    });
+  }
+
+  return matches;
+}
+
 // dd.mm.yyyy + hh:mm => Date (lokal)
 function parseDEDateTime(datum, uhrzeit) {
   if (!datum || !uhrzeit) return null;
@@ -203,7 +271,13 @@ function computePlayedMatches(matches) {
 
 function buildPayload(teamId, cfg, text) {
   const table = parseRanking(text);
-  const matches = parseMatches(text);
+  let matches = parseMatchesStrict(text);
+
+// Fallback nur wenn offensichtlich "zu wenig" erkannt wurde
+if (matches.length < 5) {
+  const relaxed = parseMatchesRelaxed(text);
+  if (relaxed.length > matches.length) matches = relaxed;
+}
 
   const status = table.length || matches.length ? "ACTIVE" : "PENDING";
 
