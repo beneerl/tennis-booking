@@ -46,16 +46,20 @@ const getMatchState = (m) => {
   return "upcoming";
 };
 
+const normalizeClub = (s) =>
+  stripClubId(s).replace(/\s+/g, " ").trim().toLowerCase();
+
+const OUR = normalizeClub(OUR_CLUB);
+
 const involvesOurClub = (m) => {
-  const o = OUR_CLUB.toLowerCase();
-  const heim = stripClubId(m?.heim).toLowerCase();
-  const gast = stripClubId(m?.gast).toLowerCase();
-  return heim.includes(o) || gast.includes(o);
+  const heim = normalizeClub(m?.heim);
+  const gast = normalizeClub(m?.gast);
+  return heim === OUR || gast === OUR; // ✅ exakt, nicht includes
 };
 
 const computeHomeFlagForOurClub = (m) => {
-  const heim = stripClubId(m?.heim).toLowerCase();
-  return heim.includes(OUR_CLUB.toLowerCase());
+  const heim = normalizeClub(m?.heim);
+  return heim === OUR;
 };
 
 const mapMatch = (m) => {
