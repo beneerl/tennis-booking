@@ -52,11 +52,12 @@ function pdfToText(pdfPath) {
 }
 
 function toLines(text) {
-  return text
+  return String(text || "")
+    .replace(/\f/g, "\n") // ✅ Seitenumbruch aus PDF (FormFeed) -> Zeilenumbruch
     .split(/\r?\n/)
-    .map((l) => l.replace(/\u00a0/g, " ")) // NBSP -> space
+    .map((l) => l.replace(/[\u00a0\u2007\u202f]/g, " ")) // NBSP + andere "komische" Spaces
     .map((l) => l.replace(/\t/g, " "))
-    .map((l) => l.replace(/\s+$/g, "")); // rechts trim, links lassen (Spalten!)
+    .map((l) => l.replace(/\s+$/g, "")); // rechts trim
 }
 
 // === Ranking (Tabelle) robust ===
@@ -261,16 +262,43 @@ function parseMatchesSummer(text) {
   const lines = toLines(text);
   const matches = [];
 
-  // Sommer-PDF ist oft „wilder“ -> wir scannen Zeilen nach Datum/Uhrzeit
-  const re =
-    /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)[,]?\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{1,2}[:.]\d{2})\s+(.*)$/;
+  // Termin kann 09:00 oder 09.00 sein, Komma nach Wochentag manchmal vorhanden
+  const terminRe =
+    /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)[,]?\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{1,2}[:.]\d{2})\s*(.*)$/;
 
-  for (const raw of lines) {
-    const line = String(raw || "");
-    const trimmed = line.trim();
+  // Helfer: versucht aus "rest" heim/gast/erg zu ziehen
+  function parseRest(rest) {
+    const r = String(rest || "").trim();
+    if (!r) return null;
+
+    // Spalten sind meist 2+ Spaces
+    let parts = r.split(/\s{2,}/).map((x) => x.trim()).filter(Boolean);
+
+    // Fallback: manchmal hat pdftotext zu stark gekürzt -> dann wenigstens grob splitten
+    if (parts.length < 2) {
+      parts = r.split(/\s{1,}/).map((x) => x.trim()).filter(Boolean);
+      // Wenn das zu granular wird, bringt es nix -> dann lieber null
+      if (parts.length < 4) return null;
+      // grob: heim = erste Hälfte, gast = zweite Hälfte (heuristisch)
+      const mid = Math.floor(parts.length / 2);
+      const heim = parts.slice(0, mid).join(" ");
+      const gast = parts.slice(mid).join(" ");
+      return { heim, gast, erg: (r.match(/(\d+:\d+)/) || [])[1] || "" };
+    }
+
+    const heim = parts[0] || "";
+    const gast = parts[1] || "";
+    const erg = (r.match(/(\d+:\d+)/) || [])[1] || "";
+
+    if (!heim || !gast) return null;
+    return { heim, gast, erg };
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = String(lines[i] || "").trim();
     if (!trimmed) continue;
 
-    // Halle/Spielort an letztes Match hängen
+    // Spielort/Halle-Zeilen ans letzte Match hängen
     if (/^(halle|spielort):/i.test(trimmed) && matches.length) {
       matches[matches.length - 1].halle = trimmed
         .replace(/^(halle|spielort):\s*/i, "")
@@ -278,27 +306,50 @@ function parseMatchesSummer(text) {
       continue;
     }
 
-    const m = trimmed.match(re);
+    const m = trimmed.match(terminRe);
     if (!m) continue;
 
     const wochentag = m[1];
     const datum = m[2];
-    const uhrzeit = m[3].replace(".", ":"); // 09.00 -> 09:00
-    const rest = m[4];
+    const uhrzeit = m[3].replace(".", ":");
+    let rest = m[4] || "";
 
-    // Teams stehen meist als Spalten -> viele Leerzeichen
-    const parts = rest.split(/\s{2,}/).map((x) => x.trim()).filter(Boolean);
+    // ✅ WICHTIG: Sommer-PDF bricht manchmal um -> dann stehen Heim/Gast in der nächsten Zeile
+    // Wir hängen bis zu 2 Folgezeilen an, solange sie NICHT ein neuer Termin sind.
+    let parsed = parseRest(rest);
+    let lookahead = 0;
+    let j = i + 1;
 
-    const heim = parts[0] || "";
-    const gast = parts[1] || "";
+    while (!parsed && lookahead < 2 && j < lines.length) {
+      const nxt = String(lines[j] || "").trim();
+      if (!nxt) {
+        j++;
+        continue;
+      }
 
-    const scoreMatch = rest.match(/(\d+:\d+)/);
-    const erg = scoreMatch ? scoreMatch[1] : "";
+      // Wenn nächste Zeile wieder ein Termin ist, abbrechen (neues Match)
+      if (terminRe.test(nxt)) break;
 
-    // Nur Matches mit mind. Heim+Gast übernehmen
-    if (!heim || !gast) continue;
+      // Wenn nächste Zeile Spielort/Halle ist, NICHT als Teamzeile verwenden
+      if (/^(halle|spielort):/i.test(nxt)) break;
 
-    matches.push({ wochentag, datum, uhrzeit, heim, gast, erg });
+      rest = `${rest}  ${nxt}`.trim();
+      parsed = parseRest(rest);
+
+      lookahead++;
+      j++;
+    }
+
+    if (!parsed) continue;
+
+    matches.push({
+      wochentag,
+      datum,
+      uhrzeit,
+      heim: parsed.heim,
+      gast: parsed.gast,
+      erg: parsed.erg,
+    });
   }
 
   return matches;
