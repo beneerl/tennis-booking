@@ -23,6 +23,16 @@ const TEAM_MAP = {
     team: "Herren I (Sommer)",
     parser: "summer"
   },
+
+  // ✅ NEU: Herren Sommer II
+herren_s2: {
+  team_id: "herren_s2",
+  pdf_url:
+    "https://btv.liga.nu/cgi-bin/WebObjects/nuLigaDokumentTENDE.woa/wa/nuDokument?dokument=ScheduleReportFOP&group=2215959",
+  season: "Sommer 2026",
+  team: "Herren II (Sommer)",
+  parser: "summer",
+},
 };
 
 
