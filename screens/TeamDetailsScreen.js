@@ -12,7 +12,16 @@ import {
 import { supabase } from "../supabaseClient";
 
 // ✅ Exakter Clubname wie in nuLiga/PDF (wichtig für Filter + Heim/Auswärts)
-const OUR_CLUB = "TeG Alzstadt";
+// ✅ Clubname je Team (wichtig für TEG-Tab + Heim/Auswärts)
+const OUR_CLUB_DEFAULT = "TeG Alzstadt";
+const OUR_CLUB_BY_TEAM = {
+  herren_s2: "TeG Alzstadt II",
+  // falls du später brauchst:
+  // mixed_1: "TeG Alzstadt",
+  // mixed_2: "TeG Alzstadt",
+};
+
+const getOurClubForTeam = (teamId) => OUR_CLUB_BY_TEAM[teamId] || OUR_CLUB_DEFAULT;
 
 // ---------- Helpers ----------
 const stripClubId = (s) => String(s || "").replace(/\s*\(\d+\)\s*$/, "").trim();
@@ -49,17 +58,15 @@ const getMatchState = (m) => {
 const normalizeClub = (s) =>
   stripClubId(s).replace(/\s+/g, " ").trim().toLowerCase();
 
-const OUR = normalizeClub(OUR_CLUB);
-
-const involvesOurClub = (m) => {
+const involvesOurClub = (m, ourNorm) => {
   const heim = normalizeClub(m?.heim);
   const gast = normalizeClub(m?.gast);
-  return heim === OUR || gast === OUR; // ✅ exakt, nicht includes
+  return heim === ourNorm || gast === ourNorm; // ✅ exakt
 };
 
-const computeHomeFlagForOurClub = (m) => {
+const computeHomeFlagForOurClub = (m, ourNorm) => {
   const heim = normalizeClub(m?.heim);
-  return heim === OUR;
+  return heim === ourNorm;
 };
 
 const mapMatch = (m) => {
@@ -161,6 +168,8 @@ function TabButton({ label, active, onPress }) {
 
 export default function TeamDetailsScreen({ route, navigation }) {
   const teamId = route?.params?.teamId || "unknown";
+  const ourClubName = useMemo(() => getOurClubForTeam(teamId), [teamId]);
+const ourNorm = useMemo(() => normalizeClub(ourClubName), [ourClubName]);
   const teamTitle =
     route?.params?.teamTitle ||
     route?.params?.label ||
@@ -243,9 +252,9 @@ export default function TeamDetailsScreen({ route, navigation }) {
   const rawMatches = payload?.matches || [];
   const allMatches = rawMatches.map(mapMatch).filter((m) => m.dateObj);
 
-  const ourMatchesRaw = allMatches
-    .filter(involvesOurClub)
-    .map((m) => ({ ...m, home: computeHomeFlagForOurClub(m) }));
+const ourMatchesRaw = allMatches
+  .filter((m) => involvesOurClub(m, ourNorm))
+  .map((m) => ({ ...m, home: computeHomeFlagForOurClub(m, ourNorm) }));
 
   const { upcoming: ourUpcoming, played: ourPlayed } = splitMatches(ourMatchesRaw);
   const tegList = [...ourUpcoming, ...ourPlayed];
