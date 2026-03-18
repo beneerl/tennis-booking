@@ -260,101 +260,106 @@ function parseMatchesWinter(text) {
 
 function parseMatchesSummer(text) {
   const lines = toLines(text);
+
+  // Wir brauchen die Spaltenpositionen aus dem Header
+  const headerIdx = lines.findIndex((l) =>
+    l.toLowerCase().includes("termin") &&
+    l.toLowerCase().includes("heimmannschaft") &&
+    l.toLowerCase().includes("gastmannschaft")
+  );
+  if (headerIdx === -1) return [];
+
+  const header = lines[headerIdx];
+
+  const terminStart = header.indexOf("Termin");
+  const heimStart = header.indexOf("Heimmannschaft");
+  const gastStart = header.indexOf("Gastmannschaft");
+  let ergStart = header.indexOf("Erg.");
+  if (ergStart === -1) ergStart = header.indexOf("Bem.");
+
+  if ([terminStart, heimStart, gastStart, ergStart].some((i) => i < 0)) return [];
+
   const matches = [];
 
-  // Termin kann 09:00 oder 09.00 sein, Komma nach Wochentag manchmal vorhanden
-  const terminRe =
-    /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)[,]?\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{1,2}[:.]\d{2})\s*(.*)$/;
+  const fullTermin =
+    /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)[,]?\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{1,2}[:.]\d{2})\s*$/;
 
-  // Helfer: versucht aus "rest" heim/gast/erg zu ziehen
-  function parseRest(rest) {
-    const r = String(rest || "").trim();
-    if (!r) return null;
+  const timeOnly = /^(\d{1,2}[:.]\d{2})\s*$/;
 
-    // Spalten sind meist 2+ Spaces
-    let parts = r.split(/\s{2,}/).map((x) => x.trim()).filter(Boolean);
+  // ✅ merken wir uns für "Folgezeilen" ohne Datum:
+  let currentWochentag = "";
+  let currentDatum = "";
 
-    // Fallback: manchmal hat pdftotext zu stark gekürzt -> dann wenigstens grob splitten
-    if (parts.length < 2) {
-      parts = r.split(/\s{1,}/).map((x) => x.trim()).filter(Boolean);
-      // Wenn das zu granular wird, bringt es nix -> dann lieber null
-      if (parts.length < 4) return null;
-      // grob: heim = erste Hälfte, gast = zweite Hälfte (heuristisch)
-      const mid = Math.floor(parts.length / 2);
-      const heim = parts.slice(0, mid).join(" ");
-      const gast = parts.slice(mid).join(" ");
-      return { heim, gast, erg: (r.match(/(\d+:\d+)/) || [])[1] || "" };
-    }
+  for (let i = headerIdx + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line || !line.trim()) continue;
 
-    const heim = parts[0] || "";
-    const gast = parts[1] || "";
-    const erg = (r.match(/(\d+:\d+)/) || [])[1] || "";
+    const trimmed = line.trim();
 
-    if (!heim || !gast) return null;
-    return { heim, gast, erg };
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = String(lines[i] || "").trim();
-    if (!trimmed) continue;
-
-    // Spielort/Halle-Zeilen ans letzte Match hängen
-    if (/^(halle|spielort):/i.test(trimmed) && matches.length) {
-      matches[matches.length - 1].halle = trimmed
-        .replace(/^(halle|spielort):\s*/i, "")
-        .trim();
+    // Header kann auf Seite 2 nochmal auftauchen -> überspringen
+    if (
+      trimmed.toLowerCase().includes("termin") &&
+      trimmed.toLowerCase().includes("heimmannschaft") &&
+      trimmed.toLowerCase().includes("gastmannschaft")
+    ) {
       continue;
     }
 
-    const m = trimmed.match(terminRe);
-    if (!m) continue;
-
-    const wochentag = m[1];
-    const datum = m[2];
-    const uhrzeit = m[3].replace(".", ":");
-    let rest = m[4] || "";
-
-    // ✅ WICHTIG: Sommer-PDF bricht manchmal um -> dann stehen Heim/Gast in der nächsten Zeile
-    // Wir hängen bis zu 2 Folgezeilen an, solange sie NICHT ein neuer Termin sind.
-    let parsed = parseRest(rest);
-    let lookahead = 0;
-    let j = i + 1;
-
-    while (!parsed && lookahead < 2 && j < lines.length) {
-      const nxt = String(lines[j] || "").trim();
-      if (!nxt) {
-        j++;
-        continue;
-      }
-
-      // Wenn nächste Zeile wieder ein Termin ist, abbrechen (neues Match)
-      if (terminRe.test(nxt)) break;
-
-      // Wenn nächste Zeile Spielort/Halle ist, NICHT als Teamzeile verwenden
-      if (/^(halle|spielort):/i.test(nxt)) break;
-
-      rest = `${rest}  ${nxt}`.trim();
-      parsed = parseRest(rest);
-
-      lookahead++;
-      j++;
+    // Spielort/Halle hängt ans letzte Match
+    if (/^(halle|spielort):/i.test(trimmed) && matches.length) {
+      const loc = trimmed.replace(/^(halle|spielort):\s*/i, "");
+      // falls rechts noch irgendwas "dranklebt", schneiden wir am ersten großen Gap ab
+      matches[matches.length - 1].halle = loc.split(/\s{2,}/)[0].trim();
+      continue;
     }
 
-    if (!parsed) continue;
+    // Spalten schneiden
+    const terminField = line.slice(terminStart, heimStart).trim();
+    const heimField = line.slice(heimStart, gastStart).trim();
+    const gastField = line.slice(gastStart, ergStart).trim();
+    const ergField = line.slice(ergStart).trim();
+
+    // 1) volle Termin-Zeile? -> Datum merken
+    let wochentag = "";
+    let datum = "";
+    let uhrzeit = "";
+
+    const tmFull = terminField.match(fullTermin);
+    if (tmFull) {
+      wochentag = tmFull[1];
+      datum = tmFull[2];
+      uhrzeit = tmFull[3].replace(".", ":");
+
+      currentWochentag = wochentag;
+      currentDatum = datum;
+    } else {
+      // 2) nur Uhrzeit? -> Datum vom letzten vollen Termin übernehmen
+      const tmTime = terminField.match(timeOnly);
+      if (!tmTime || !currentDatum) continue;
+
+      wochentag = currentWochentag;
+      datum = currentDatum;
+      uhrzeit = tmTime[1].replace(".", ":");
+    }
+
+    // Teams müssen da sein
+    if (!heimField || !gastField) continue;
+
+    const scoreMatch = ergField.match(/(\d+:\d+)/);
+    const erg = scoreMatch ? scoreMatch[1] : "";
 
     matches.push({
       wochentag,
       datum,
       uhrzeit,
-      heim: parsed.heim,
-      gast: parsed.gast,
-      erg: parsed.erg,
+      heim: heimField,
+      gast: gastField,
+      erg,
     });
   }
 
   return matches;
 }
-
 // dd.mm.yyyy + hh:mm => Date (lokal)
 function parseDEDateTime(datum, uhrzeit) {
   if (!datum || !uhrzeit) return null;
