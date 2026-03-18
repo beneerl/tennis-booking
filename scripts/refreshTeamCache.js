@@ -52,12 +52,12 @@ function pdfToText(pdfPath) {
 }
 
 function toLines(text) {
-  return String(text || "")
-    .replace(/\f/g, "\n") // ✅ Seitenumbruch aus PDF (FormFeed) -> Zeilenumbruch
+  return text
     .split(/\r?\n/)
-    .map((l) => l.replace(/[\u00a0\u2007\u202f]/g, " ")) // NBSP + andere "komische" Spaces
+    .map((l) => l.replace(/\u00a0/g, " "))
+    .map((l) => l.replace(/\f/g, ""))     // ✅ neu
     .map((l) => l.replace(/\t/g, " "))
-    .map((l) => l.replace(/\s+$/g, "")); // rechts trim
+    .map((l) => l.replace(/\s+$/g, ""));
 }
 
 // === Ranking (Tabelle) robust ===
@@ -260,66 +260,77 @@ function parseMatchesWinter(text) {
 
 function parseMatchesSummer(text) {
   const lines = toLines(text);
-
-  // Wir brauchen die Spaltenpositionen aus dem Header
-  const headerIdx = lines.findIndex((l) =>
-    l.toLowerCase().includes("termin") &&
-    l.toLowerCase().includes("heimmannschaft") &&
-    l.toLowerCase().includes("gastmannschaft")
-  );
-  if (headerIdx === -1) return [];
-
-  const header = lines[headerIdx];
-
-  const terminStart = header.indexOf("Termin");
-  const heimStart = header.indexOf("Heimmannschaft");
-  const gastStart = header.indexOf("Gastmannschaft");
-  let ergStart = header.indexOf("Erg.");
-  if (ergStart === -1) ergStart = header.indexOf("Bem.");
-
-  if ([terminStart, heimStart, gastStart, ergStart].some((i) => i < 0)) return [];
-
   const matches = [];
 
   const fullTermin =
     /^(Mo\.|Di\.|Mi\.|Do\.|Fr\.|Sa\.|So\.)[,]?\s+(\d{2}\.\d{2}\.\d{4})\s+(\d{1,2}[:.]\d{2})\s*$/;
-
   const timeOnly = /^(\d{1,2}[:.]\d{2})\s*$/;
 
-  // ✅ merken wir uns für "Folgezeilen" ohne Datum:
+  // ✅ “current date” merken für Zeilen, die nur Uhrzeit haben
   let currentWochentag = "";
   let currentDatum = "";
 
-  for (let i = headerIdx + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line || !line.trim()) continue;
+  // ✅ Spalten-Offsets – werden bei jedem Header neu gesetzt
+  let terminStart = -1,
+    heimStart = -1,
+    gastStart = -1,
+    ergStart = -1;
+  let haveCols = false;
 
+  const isHeaderLine = (l) => {
+    const low = String(l || "").toLowerCase();
+    return (
+      low.includes("termin") &&
+      low.includes("heimmannschaft") &&
+      low.includes("gastmannschaft")
+    );
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = String(lines[i] || "");
     const trimmed = line.trim();
+    if (!trimmed) continue;
 
-    // Header kann auf Seite 2 nochmal auftauchen -> überspringen
-    if (
-      trimmed.toLowerCase().includes("termin") &&
-      trimmed.toLowerCase().includes("heimmannschaft") &&
-      trimmed.toLowerCase().includes("gastmannschaft")
-    ) {
+    // ✅ Header kann auf Seite 2 nochmal kommen -> Offsets neu berechnen
+    if (isHeaderLine(trimmed)) {
+      const header = line;
+
+      terminStart = header.indexOf("Termin");
+      heimStart = header.indexOf("Heimmannschaft");
+      gastStart = header.indexOf("Gastmannschaft");
+
+      // Erg/Bem ist je nach PDF verschieden
+      ergStart = header.indexOf("Erg.");
+      if (ergStart === -1) ergStart = header.indexOf("Bem.");
+      if (ergStart === -1) ergStart = header.toLowerCase().indexOf("erg");
+      if (ergStart === -1) ergStart = header.length;
+
+      haveCols =
+        terminStart >= 0 &&
+        heimStart > terminStart &&
+        gastStart > heimStart &&
+        ergStart > gastStart;
+
       continue;
     }
 
-    // Spielort/Halle hängt ans letzte Match
+    // solange wir noch keinen Header gesehen haben -> skip
+    if (!haveCols) continue;
+
+    // Spielort/Halle an letztes Match hängen
     if (/^(halle|spielort):/i.test(trimmed) && matches.length) {
-      const loc = trimmed.replace(/^(halle|spielort):\s*/i, "");
-      // falls rechts noch irgendwas "dranklebt", schneiden wir am ersten großen Gap ab
+      const loc = trimmed.replace(/^(halle|spielort):\s*/i, "").trim();
       matches[matches.length - 1].halle = loc.split(/\s{2,}/)[0].trim();
       continue;
     }
 
-    // Spalten schneiden
+    // Felder aus Spalten schneiden (mit den aktuellen Offsets!)
     const terminField = line.slice(terminStart, heimStart).trim();
     const heimField = line.slice(heimStart, gastStart).trim();
     const gastField = line.slice(gastStart, ergStart).trim();
     const ergField = line.slice(ergStart).trim();
 
-    // 1) volle Termin-Zeile? -> Datum merken
+    // Termin interpretieren: entweder “voll” oder “nur Uhrzeit”
     let wochentag = "";
     let datum = "";
     let uhrzeit = "";
@@ -329,20 +340,16 @@ function parseMatchesSummer(text) {
       wochentag = tmFull[1];
       datum = tmFull[2];
       uhrzeit = tmFull[3].replace(".", ":");
-
       currentWochentag = wochentag;
       currentDatum = datum;
     } else {
-      // 2) nur Uhrzeit? -> Datum vom letzten vollen Termin übernehmen
       const tmTime = terminField.match(timeOnly);
       if (!tmTime || !currentDatum) continue;
-
       wochentag = currentWochentag;
       datum = currentDatum;
       uhrzeit = tmTime[1].replace(".", ":");
     }
 
-    // Teams müssen da sein
     if (!heimField || !gastField) continue;
 
     const scoreMatch = ergField.match(/(\d+:\d+)/);
