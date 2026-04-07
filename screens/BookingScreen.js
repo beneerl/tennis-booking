@@ -9,6 +9,8 @@ import {
   Alert,
   TextInput,
   Platform,
+  ActivityIndicator,
+  Modal,
 } from "react-native";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -115,6 +117,12 @@ const [courtClosureReason, setCourtClosureReason] = useState({ 0: "", 1: "", 2: 
   const [endOptions, setEndOptions] = useState([]);
   const [selectedEndTime, setSelectedEndTime] = useState(null);
   const [coPlayerNameInput, setCoPlayerNameInput] = useState("");
+  // --- Co-Player Picker ---
+  const [coPickerOpen, setCoPickerOpen] = useState(false);
+  const [coPickerSearch, setCoPickerSearch] = useState("");
+  const [allUsers, setAllUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [myUserId, setMyUserId] = useState(null);
 const pendingDeleteRef = useRef(new Set()); // merkt sich Slots, die gerade gelöscht werden
 const gridScrollRef = useRef(null);
 const retryBookingsRef = useRef(false);
@@ -214,10 +222,12 @@ useEffect(() => {
       // 3) nochmal prüfen
       const { data: s2 } = await supabase.auth.getSession();
       setSessionReady(!!s2?.session?.user?.id);
+      setMyUserId(s2?.session?.user?.id || null);
 
       // 4) bei Änderungen updaten (Login/Logout/Refresh)
       const { data } = supabase.auth.onAuthStateChange((_event, session) => {
         setSessionReady(!!session?.user?.id);
+        setMyUserId(s2?.session?.user?.id || null);
       });
       sub = data?.subscription;
     } catch (e) {
@@ -457,6 +467,70 @@ const loadCourtClosures = async () => {
       console.log("court_closures load error:", error.message);
       return;
     }
+
+    const loadAllUsers = async () => {
+  setUsersLoading(true);
+
+  // Wir probieren mehrere Tabellen/Spalten, damit es bei dir sicher läuft:
+  // 1) profiles.display_name
+  // 2) users.name
+  // 3) users.display_name
+  // 4) lk_profiles.display_name (Fallback, falls es nix anderes gibt)
+  const tries = [
+    { table: "profiles", nameField: "display_name", idField: "user_id" },
+    { table: "users", nameField: "name", idField: "id" },
+    { table: "users", nameField: "display_name", idField: "id" },
+    { table: "lk_profiles", nameField: "display_name", idField: "user_id" },
+  ];
+
+  try {
+    for (const t of tries) {
+      const selectCols = `${t.idField}, ${t.nameField}`;
+      const { data, error } = await supabase.from(t.table).select(selectCols);
+
+      if (error) {
+        console.log(`loadAllUsers: ${t.table} failed:`, error.message);
+        continue; // nächster Versuch
+      }
+
+      const cleaned = (data || [])
+        .map((r) => ({
+          id: r?.[t.idField] ?? null,
+          name: String(r?.[t.nameField] || "").trim(),
+        }))
+        .filter((u) => u.name.length > 0)
+        .filter((u) => (myUserId ? u.id !== myUserId : true));
+
+      // Duplikate entfernen (case-insensitive)
+      const seen = new Set();
+      const unique = [];
+      for (const u of cleaned) {
+        const key = u.name.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        unique.push(u);
+      }
+
+      unique.sort((a, b) => a.name.localeCompare(b.name, "de"));
+
+      setAllUsers(unique);
+      setUsersLoading(false);
+      return; // ✅ fertig
+    }
+
+    // Wenn alles fehlschlägt:
+    setAllUsers([]);
+    setUsersLoading(false);
+    showMessage(
+      "Spielerliste nicht verfügbar",
+      "Ich konnte keine Userliste laden. (Wahrscheinlich fehlen Rechte/Policy für die Users-Tabelle.)"
+    );
+  } catch (e) {
+    setUsersLoading(false);
+    console.log("loadAllUsers exception:", String(e));
+    showMessage("Fehler", String(e));
+  }
+};
 
     const map = { 0: false, 1: false, 2: false };
     const reasons = { 0: "", 1: "", 2: "" };
@@ -1048,14 +1122,29 @@ if (past && !isAdmin) {
               </Text>
             )}
 
-            <Text style={styles.modalLabel}>Mitspieler (optional)</Text>
-            <TextInput
-              style={styles.coPlayerInput}
-              value={coPlayerNameInput}
-              onChangeText={setCoPlayerNameInput}
-              placeholder="Name des 2. Spielers"
-              placeholderTextColor="#9fb0c8"
-            />
+           <Text style={styles.modalLabel}>Mitspieler (optional)</Text>
+
+<View style={styles.coPlayerRow}>
+  <TextInput
+    style={[styles.coPlayerInput, { flex: 1 }]}
+    value={coPlayerNameInput}
+    onChangeText={setCoPlayerNameInput}
+    placeholder="Name des 2. Spielers"
+    placeholderTextColor="#9fb0c8"
+  />
+
+  <TouchableOpacity
+    style={styles.coPickBtn}
+    onPress={async () => {
+      setCoPickerSearch("");
+      setCoPickerOpen(true);
+      if (allUsers.length === 0) await loadAllUsers();
+    }}
+    activeOpacity={0.9}
+  >
+    <Text style={styles.coPickBtnText}>Suchen</Text>
+  </TouchableOpacity>
+</View>
 
             <View style={styles.modalButtonsRow}>
               <TouchableOpacity
@@ -1074,6 +1163,64 @@ if (past && !isAdmin) {
           </View>
         </View>
       )}
+      {coPickerOpen && (
+  <Modal
+    visible={coPickerOpen}
+    transparent
+    animationType="fade"
+    onRequestClose={() => setCoPickerOpen(false)}
+  >
+    <View style={styles.modalOverlay}>
+      <View style={styles.modalBox}>
+        <Text style={styles.modalTitle}>Spieler auswählen</Text>
+
+        <TextInput
+          value={coPickerSearch}
+          onChangeText={setCoPickerSearch}
+          placeholder="Suchen…"
+          placeholderTextColor="#9fb0c8"
+          style={styles.coSearchInput}
+        />
+
+        {usersLoading ? (
+          <View style={{ paddingVertical: 16, alignItems: "center" }}>
+            <ActivityIndicator color="#fff" />
+            <Text style={{ color: "#9fb0c8", marginTop: 8 }}>Lade Spieler…</Text>
+          </View>
+        ) : (
+          <ScrollView style={{ maxHeight: 320 }}>
+            {(allUsers || [])
+              .filter((u) =>
+                u.name.toLowerCase().includes(coPickerSearch.trim().toLowerCase())
+              )
+              .map((u) => (
+                <TouchableOpacity
+                  key={u.id || u.name}
+                  style={styles.coUserRow}
+                  onPress={() => {
+                    setCoPlayerNameInput(u.name);
+                    setCoPickerOpen(false);
+                  }}
+                  activeOpacity={0.9}
+                >
+                  <Text style={styles.coUserName} numberOfLines={1}>
+                    {u.name}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+          </ScrollView>
+        )}
+
+        <TouchableOpacity
+          style={[styles.modalButton, styles.modalButtonCancel, { marginTop: 12 }]}
+          onPress={() => setCoPickerOpen(false)}
+        >
+          <Text style={styles.modalButtonCancelText}>Schließen</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  </Modal>
+)}
     </View>
   );
 }
@@ -1146,6 +1293,52 @@ subHeaderToday: {
   borderBottomWidth: 2,
   borderBottomColor: "#f28b25",
   backgroundColor: "#00265f", // minimal heller als #001e4f
+},
+
+coPlayerRow: {
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 10,
+},
+
+coPickBtn: {
+  paddingVertical: 10,
+  paddingHorizontal: 12,
+  borderRadius: 12,
+  backgroundColor: "rgba(8, 35, 80, 0.55)",
+  borderWidth: 1,
+  borderColor: "#355a8a",
+},
+
+coPickBtnText: {
+  color: "#ffffff",
+  fontWeight: "900",
+},
+
+coSearchInput: {
+  marginTop: 10,
+  borderWidth: 1,
+  borderColor: "#355a8a",
+  borderRadius: 14,
+  paddingHorizontal: 12,
+  paddingVertical: 10,
+  color: "#fff",
+  fontWeight: "800",
+},
+
+coUserRow: {
+  marginTop: 10,
+  paddingVertical: 12,
+  paddingHorizontal: 12,
+  borderRadius: 14,
+  borderWidth: 1,
+  borderColor: "#355a8a",
+  backgroundColor: "rgba(8, 35, 80, 0.55)",
+},
+
+coUserName: {
+  color: "#fff",
+  fontWeight: "900",
 },
 
 teamsIcon: {

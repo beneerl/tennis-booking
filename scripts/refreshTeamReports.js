@@ -69,7 +69,9 @@ async function fetchMeetingIdsForGroup(groupId) {
   for (const url of urls) {
     try {
       const html = await fetchText(url);
-      const ids = [...html.matchAll(/MeetingReportFOP&meeting=(\d+)/g)].map((m) => m[1]);
+      const ids = [
+  ...html.matchAll(/(?:MeetingReportFOP&meeting=|MeetingReportFOP%26meeting%3D)(\d+)/g),
+].map((m) => m[1]);
       if (ids.length) return uniq(ids);
     } catch (e) {
       console.log("meeting list fetch failed:", url, String(e));
@@ -218,62 +220,80 @@ async function main() {
     console.log(`\n=== Meeting refresh for ${teamId} (group ${groupId}) ===`);
 
     // existierende payload_json holen
-    const { data: row, error: readErr } = await supabase
-      .from("meeting_reports")
-      .select("payload_json")
-      .eq("team_id", teamId)
-      .maybeSingle();
+    // ✅ existierende meeting_ids aus meeting_reports_index holen (pro Team 1 Zeile)
+const { data: idxRow, error: readErr } = await supabase
+  .from("meeting_reports_index")
+  .select("meeting_ids")
+  .eq("team_id", teamId)
+  .maybeSingle();
 
-    if (readErr) throw readErr;
+if (readErr) throw readErr;
 
-    const payload = row?.payload_json || {};
-    const existingIds = payload?.meetings?.meeting_ids || [];
-    const meetingIds = await fetchMeetingIdsForGroup(groupId);
+const meetingIds = (await fetchMeetingIdsForGroup(groupId)).map(String);
+console.log(`found meeting ids: ${meetingIds.length}`);
 
-    console.log(`found meeting ids: ${meetingIds.length}`);
+const newIds = meetingIds.filter((id) => !existingIds.includes(id));
+console.log(`new meeting ids: ${newIds.length}`);
 
-    const newIds = meetingIds.filter((id) => !existingIds.includes(id));
-    console.log(`new meeting ids: ${newIds.length}`);
+// 1) Neue Reports downloaden + parsed als EINZELZEILEN in meeting_reports speichern
+for (const meetingId of newIds) {
+  const meetingIdNum = Number(meetingId);
+  if (!Number.isFinite(meetingIdNum)) continue;
 
-    const reports = payload?.meetings?.reports || [];
-    const nextReports = [...reports];
+  const pdfUrl = `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaDokumentTENDE.woa/wa/nuDokument?dokument=MeetingReportFOP&meeting=${meetingId}`;
+  const pdfPath = path.join(tmpDir, `meeting_${meetingId}.pdf`);
 
-    for (const meetingId of newIds) {
-      const pdfUrl = `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaDokumentTENDE.woa/wa/nuDokument?dokument=MeetingReportFOP&meeting=${meetingId}`;
-      const pdfPath = path.join(tmpDir, `meeting_${meetingId}.pdf`);
+  console.log("downloading meeting pdf:", meetingId);
+  await download(pdfUrl, pdfPath);
 
-      console.log("downloading meeting pdf:", meetingId);
-      await download(pdfUrl, pdfPath);
+  const text = pdfToText(pdfPath);
+  const parsed = parseMeetingReportText(text);
 
-      const text = pdfToText(pdfPath);
-      const parsed = parseMeetingReportText(text);
+  const reportPayload = {
+    meeting_id: meetingIdNum,
+    pdf_url: pdfUrl,
+    termin: parsed.termin,
+    singles: parsed.singles,
+    doubles: parsed.doubles,
+    text_preview: text.slice(0, 800),
+  };
 
-      nextReports.push({
-        meeting_id: meetingId,
+  const { error: repErr } = await supabase
+    .from("meeting_reports")
+    .upsert(
+      {
+        meeting_id: meetingIdNum,     // ✅ niemals null
+        team_id: teamId,
+        group_id: groupId,
         pdf_url: pdfUrl,
-        termin: parsed.termin,
-        singles: parsed.singles,
-        doubles: parsed.doubles,
-        text_preview: text.slice(0, 800),
-      });
-    }
+        payload_json: reportPayload,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "meeting_id" }
+    );
 
-    // merge zurück in payload_json
-    payload.meetings = {
-      meeting_ids: uniq([...existingIds, ...newIds]),
-      reports: nextReports,
-      last_updated: new Date().toISOString(),
-    };
+  if (repErr) throw repErr;
+}
 
-    const { error: upErr } = await supabase.from("meeting_reports").upsert({
+// 2) Index (pro Team 1 Zeile) upserten
+const mergedIds = uniq([...existingIds, ...meetingIds]).map(String);
+
+const { error: upErr } = await supabase
+  .from("meeting_reports_index")
+  .upsert(
+    {
       team_id: teamId,
-      payload_json: payload,
+      group_id: groupId,
+      meeting_ids: mergedIds,
+      last_updated: new Date().toISOString(),
       updated_at: new Date().toISOString(),
-    });
+    },
+    { onConflict: "team_id" }
+  );
 
-    if (upErr) throw upErr;
+if (upErr) throw upErr;
 
-    console.log(`✅ saved meetings for ${teamId}: total=${payload.meetings.meeting_ids.length}`);
+console.log(`✅ saved meetings for ${teamId}: total=${mergedIds.length} | new=${newIds.length}`);
   }
 }
 
