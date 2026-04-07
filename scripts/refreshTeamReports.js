@@ -219,7 +219,7 @@ async function main() {
 
     // existierende payload_json holen
     const { data: row, error: readErr } = await supabase
-      .from("team_cache")
+      .from("meetings_reports")
       .select("payload_json")
       .eq("team_id", teamId)
       .maybeSingle();
@@ -265,7 +265,7 @@ async function main() {
       last_updated: new Date().toISOString(),
     };
 
-    const { error: upErr } = await supabase.from("team_cache").upsert({
+    const { error: upErr } = await supabase.from("meeting_reports").upsert({
       team_id: teamId,
       payload_json: payload,
       updated_at: new Date().toISOString(),
