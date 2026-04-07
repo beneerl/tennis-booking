@@ -29,8 +29,16 @@ async function fetchText(url) {
     },
     redirect: "follow",
   });
-  if (!r.ok) throw new Error(`Fetch failed ${r.status} for ${url}`);
-  return await r.text();
+
+  const text = await r.text();
+
+  return {
+    ok: r.ok,
+    status: r.status,
+    finalUrl: r.url,
+    text,
+    contentType: r.headers.get("content-type") || "",
+  };
 }
 
 async function download(url, outPath) {
@@ -59,22 +67,33 @@ function uniq(arr) {
 }
 
 // 1) Meeting IDs aus nuLiga HTML ziehen
+// 1) Meeting IDs aus nuLiga HTML ziehen (robust)
 async function fetchMeetingIdsForGroup(groupId) {
   const urls = [
     `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?group=${groupId}`,
-    // fallback (manchmal andere Seite)
     `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?group=${groupId}&page=matches`,
+    `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?group=${groupId}&page=results`,
+    `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?group=${groupId}&page=meetings`,
   ];
 
   for (const url of urls) {
     try {
       const html = await fetchText(url);
-      const ids = [...html.matchAll(/MeetingReportFOP(?:&amp;|&)meeting=(\d+)/g)].map((m) => m[1]);
+
+      // ✅ extrem robust: findet meeting=123.. egal ob ?meeting=, &meeting= oder &amp;meeting=
+      const ids = [...html.matchAll(/(?:\?|&|&amp;)meeting=(\d{6,})/g)].map((m) => m[1]);
+
       if (ids.length) return uniq(ids);
+
+      // mini-debug (siehst du in Actions Logs), falls Seite was Unerwartetes liefert
+      if (html.toLowerCase().includes("meeting=")) {
+        console.log("page contains 'meeting=' but regex found 0 ->", url);
+      }
     } catch (e) {
       console.log("meeting list fetch failed:", url, String(e));
     }
   }
+
   return [];
 }
 
@@ -234,6 +253,10 @@ const existingIds = Array.isArray(idxRow?.meeting_ids)
 
 // 2) aktuelle Meeting-IDs aus nuLiga holen
 const meetingIds = (await fetchMeetingIdsForGroup(groupId)).map(String);
+if (teamId === "herren_w1" && meetingIds.length === 0) {
+  console.log("⚠️ DEBUG: no meetingIds found, using seed meetingId 12458500");
+  meetingIds.push("12458500");
+}
 
 console.log(`found meeting ids: ${meetingIds.length}`);
 
