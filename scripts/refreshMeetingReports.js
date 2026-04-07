@@ -78,10 +78,18 @@ async function fetchMeetingIdsForGroup(groupId) {
 
   for (const url of urls) {
     try {
-      const html = await fetchText(url);
+     const html = String(await fetchText(url) || "");
 
-      // ✅ extrem robust: findet meeting=123.. egal ob ?meeting=, &meeting= oder &amp;meeting=
-      const ids = [...html.matchAll(/(?:\?|&|&amp;)meeting=(\d{6,})/g)].map((m) => m[1]);
+// ✅ findet meeting=123… egal ob ?meeting=, &meeting= oder &amp;meeting=
+const re = /(?:\?|&|&amp;)meeting=(\d{6,})/g;
+const ids = [];
+
+let m;
+while ((m = re.exec(html)) !== null) {
+  ids.push(m[1]);
+}
+
+if (ids.length) return uniq(ids);
 
       if (ids.length) return uniq(ids);
 
