@@ -25,3 +25,6 @@ jobs:
 
       - name: Run refresh script
         run: node scripts/refreshTeamCache.js
+
+      - name: Run refresh team reports
+        run: node scripts/refreshTeamReports.js
