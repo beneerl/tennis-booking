@@ -24,4 +24,4 @@ jobs:
         run: npm ci
 
       - name: Run meeting reports refresh script
-        run: node scripts/refreshTeamReports.js
+        run: node scripts/refreshMeetingReports.js
