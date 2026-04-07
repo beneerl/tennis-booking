@@ -219,7 +219,7 @@ async function main() {
 
     // existierende payload_json holen
     const { data: row, error: readErr } = await supabase
-      .from("meetings_reports")
+      .from("meeting_reports")
       .select("payload_json")
       .eq("team_id", teamId)
       .maybeSingle();
