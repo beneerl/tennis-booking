@@ -68,6 +68,7 @@ function uniq(arr) {
 
 // 1) Meeting IDs aus nuLiga HTML ziehen
 // 1) Meeting IDs aus nuLiga HTML ziehen (robust)
+// 1) Meeting IDs aus nuLiga HTML ziehen (robust, ohne matchAll)
 async function fetchMeetingIdsForGroup(groupId) {
   const urls = [
     `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?group=${groupId}`,
@@ -76,27 +77,26 @@ async function fetchMeetingIdsForGroup(groupId) {
     `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?group=${groupId}&page=meetings`,
   ];
 
+  const extractIds = (html) => {
+    const ids = [];
+    const re = /MeetingReportFOP(?:&amp;|&)meeting=(\d+)/g;
+    let m;
+    while ((m = re.exec(html)) !== null) ids.push(m[1]);
+    return uniq(ids.map(String));
+  };
+
   for (const url of urls) {
     try {
-     const html = String(await fetchText(url) || "");
+      const html = await fetchText(url);
 
-// ✅ findet meeting=123… egal ob ?meeting=, &meeting= oder &amp;meeting=
-const re = /(?:\?|&|&amp;)meeting=(\d{6,})/g;
-const ids = [];
-
-let m;
-while ((m = re.exec(html)) !== null) {
-  ids.push(m[1]);
-}
-
-if (ids.length) return uniq(ids);
-
-      if (ids.length) return uniq(ids);
-
-      // mini-debug (siehst du in Actions Logs), falls Seite was Unerwartetes liefert
-      if (html.toLowerCase().includes("meeting=")) {
-        console.log("page contains 'meeting=' but regex found 0 ->", url);
+      // Debug-Hinweis: wenn du hier nur "btv.de" / generische Seite bekommst, sieht man’s sofort
+      if (!html || typeof html !== "string") {
+        console.log("meeting list: unexpected html type for", url);
+        continue;
       }
+
+      const ids = extractIds(html);
+      if (ids.length) return ids;
     } catch (e) {
       console.log("meeting list fetch failed:", url, String(e));
     }
