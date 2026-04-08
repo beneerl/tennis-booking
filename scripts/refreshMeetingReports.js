@@ -24,21 +24,34 @@ function ensurePdftotext() {
 async function fetchText(url) {
   const r = await fetch(url, {
     headers: {
-      "user-agent": "Mozilla/5.0",
+      "user-agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36",
+      accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       "accept-language": "de-DE,de;q=0.9,en;q=0.8",
     },
     redirect: "follow",
   });
 
-  const text = await r.text();
+  // WICHTIG: immer arrayBuffer -> Buffer -> String, damit html garantiert ein String ist
+  const ct = (r.headers.get("content-type") || "").toLowerCase();
+  const ab = await r.arrayBuffer();
+  const buf = Buffer.from(ab);
 
-  return {
-    ok: r.ok,
-    status: r.status,
-    finalUrl: r.url,
-    text,
-    contentType: r.headers.get("content-type") || "",
-  };
+  // nuLiga liefert manchmal iso-8859-1 / latin1
+  const charset =
+    /charset=([^;]+)/i.exec(ct)?.[1]?.trim()?.toLowerCase() || "";
+  const enc = charset.includes("iso-8859-1") || charset.includes("latin1")
+    ? "latin1"
+    : "utf8";
+
+  const text = buf.toString(enc);
+
+  // Debug (hilft dir sofort zu sehen, was wirklich kommt)
+  // console.log("fetchText:", r.status, ct, "len=", text.length, "url=", r.url);
+
+  if (!r.ok) throw new Error(`Fetch failed ${r.status} for ${url}`);
+  return text;
 }
 
 async function download(url, outPath) {
@@ -77,32 +90,51 @@ async function fetchMeetingIdsForGroup(groupId) {
     `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaTENDE.woa/wa/groupPage?group=${groupId}&page=meetings`,
   ];
 
-  const extractIds = (html) => {
-    const ids = [];
-    const re = /MeetingReportFOP(?:&amp;|&)meeting=(\d+)/g;
-    let m;
-    while ((m = re.exec(html)) !== null) ids.push(m[1]);
-    return uniq(ids.map(String));
-  };
+  const found = new Set();
 
+  // 1) Kandidaten aus HTML ziehen (breit!)
   for (const url of urls) {
     try {
       const html = await fetchText(url);
+      const s = String(html || "");
 
-      // Debug-Hinweis: wenn du hier nur "btv.de" / generische Seite bekommst, sieht man’s sofort
-      if (!html || typeof html !== "string") {
-        console.log("meeting list: unexpected html type for", url);
-        continue;
-      }
+      // sehr breit: jede meeting=12345678 (auch wenn kein MeetingReportFOP drinsteht)
+      let m;
+      const reAny = /meeting=(\d{6,})/g;
+      while ((m = reAny.exec(s)) !== null) found.add(m[1]);
 
-      const ids = extractIds(html);
-      if (ids.length) return ids;
+      // zusätzlich: direkter MeetingReportFOP-Link (HTML-Entities &amp;)
+      const reReport = /MeetingReportFOP(?:&amp;|&)meeting=(\d{6,})/g;
+      while ((m = reReport.exec(s)) !== null) found.add(m[1]);
     } catch (e) {
       console.log("meeting list fetch failed:", url, String(e));
     }
   }
 
-  return [];
+  const candidates = Array.from(found);
+
+  // 2) Optional: Kandidaten validieren -> nur echte PDFs behalten
+  const valid = [];
+  for (const id of candidates) {
+    const pdfUrl =
+      `https://btv.liga.nu/cgi-bin/WebObjects/nuLigaDokumentTENDE.woa/wa/nuDokument` +
+      `?dokument=MeetingReportFOP&meeting=${id}`;
+
+    try {
+      const r = await fetch(pdfUrl, {
+        method: "HEAD",
+        headers: { "user-agent": "Mozilla/5.0" },
+        redirect: "follow",
+      });
+
+      const ct = (r.headers.get("content-type") || "").toLowerCase();
+      if (r.ok && ct.includes("pdf")) valid.push(String(id));
+    } catch {
+      // ignore
+    }
+  }
+
+  return uniq(valid);
 }
 
 // ---- Parser: MeetingReportFOP PDF Text ----
