@@ -227,7 +227,7 @@ useEffect(() => {
       // 4) bei Änderungen updaten (Login/Logout/Refresh)
       const { data } = supabase.auth.onAuthStateChange((_event, session) => {
         setSessionReady(!!session?.user?.id);
-        setMyUserId(s2?.session?.user?.id || null);
+        setMyUserId(session?.user?.id || null);
       });
       sub = data?.subscription;
     } catch (e) {
@@ -271,13 +271,14 @@ useEffect(() => {
     loadMaxHours();
   }, []);
 // Helper (oberhalb von loadBookingsForDate einfügen)
+// Helper (oberhalb von loadBookingsForDate einfügen)
 async function ensureSupabaseSession() {
   try {
     const { data: s1, error: e1 } = await supabase.auth.getSession();
     if (e1) console.log("getSession error:", e1.message);
     if (s1?.session) return s1.session;
 
-    // iOS PWA: Session ist manchmal erst nach refreshSession verfügbar
+    // iOS PWA/Home-Screen: Session ist manchmal erst nach refreshSession verfügbar
     const { data: s2, error: e2 } = await supabase.auth.refreshSession();
     if (e2) console.log("refreshSession error:", e2.message);
     return s2?.session || null;
@@ -287,25 +288,16 @@ async function ensureSupabaseSession() {
   }
 }
 
-// ✅ ERSETZEN: deine Funktion komplett so übernehmen
 const loadBookingsForDate = async (dateKey) => {
   try {
-    const { data: s } = await supabase.auth.getSession();
-if (!s?.session?.user?.id) {
-  console.log("No session yet -> skip bookings load");
-  setBookings([]);
-  return;
-}
-
-    // 1) Session erzwingen (WICHTIG für iOS Home-Screen + RLS)
+    // 1) Session erzwingen (WICHTIG iOS PWA/Home-Screen)
     const session = await ensureSupabaseSession();
+
+    // ❗WICHTIG: NICHT bookings leeren, sonst bleibt UI bei iOS leer hängen
     if (!session?.user?.id) {
-      console.log("No session in loadBookingsForDate (likely iOS PWA storage issue)");
-      showMessage(
-        "Nicht eingeloggt",
-        "Bitte einmal neu einloggen. (iOS Home-Bildschirm kann Sessions verlieren.)"
+      console.log(
+        "No session in loadBookingsForDate -> skip (keep previous bookings)"
       );
-      setBookings([]);
       return;
     }
 
@@ -317,9 +309,8 @@ if (!s?.session?.user?.id) {
 
     if (error) {
       console.log("Supabase load error:", error.message);
-      // Supabase-Error (Policy/DB/etc.) -> echtes Problem => Popup ok
-showMessage("DB-Fehler (Buchungen laden)", error.message);
-return;
+      showMessage("DB-Fehler (Buchungen laden)", error.message);
+      return;
     }
 
     // 3) Mapping
@@ -332,45 +323,41 @@ return;
       coPlayerName: row.player2 || "",
     }));
 
-    // 4) Pending deletes filtern (dein Code)
+    // 4) Pending deletes filtern
     const filtered = mapped.filter((b) => !pendingDeleteRef.current.has(b.id));
     setBookings(filtered);
 
-    // (Optional) Debug
     console.log(`Bookings loaded for ${dateKey}:`, filtered.length);
-} catch (e) {
-  const msg = String(e?.message || e);
-  const low = msg.toLowerCase();
+  } catch (e) {
+    const msg = String(e?.message || e);
+    const low = msg.toLowerCase();
 
-  const isNet =
-    low.includes("failed to fetch") ||
-    low.includes("network request failed") ||
-    low.includes("load failed") ||
-    low.includes("networkerror");
+    const isNet =
+      low.includes("failed to fetch") ||
+      low.includes("network request failed") ||
+      low.includes("load failed") ||
+      low.includes("networkerror");
 
-  // ✅ Netzwerk-Glitch nach Resume: kein Popup, sondern EIN Retry
-  if (isNet) {
-    console.log("Transient fetch error -> retry once...", msg);
+    if (isNet) {
+      console.log("Transient fetch error -> retry once...", msg);
 
-    // Anti-Loop: nur 1 Retry gleichzeitig erlauben
-    if (retryBookingsRef.current) return;
-    retryBookingsRef.current = true;
+      if (retryBookingsRef.current) return;
+      retryBookingsRef.current = true;
 
-    setTimeout(async () => {
-      try {
-        await loadBookingsForDate(dateKey);
-      } finally {
-        retryBookingsRef.current = false;
-      }
-    }, 900);
+      setTimeout(async () => {
+        try {
+          await loadBookingsForDate(dateKey);
+        } finally {
+          retryBookingsRef.current = false;
+        }
+      }, 900);
 
-    return;
+      return;
+    }
+
+    console.log("Supabase load exception:", e);
+    showMessage("DB-Fehler (Buchungen laden)", msg);
   }
-
-  // ❌ echte Fehler -> Popup
-  console.log("Supabase load exception:", e);
-  showMessage("DB-Fehler (Buchungen laden)", msg);
-}
 };
 
 
