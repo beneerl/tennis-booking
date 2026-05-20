@@ -34,6 +34,21 @@ export default function AdminSettingsScreen({ route, navigation }) {
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [weeklyRules, setWeeklyRules] = useState([]);
 
+  // ===== Weekly Block Exceptions (einmalige Ausnahmen pro Datum) =====
+const [exDateKey, setExDateKey] = useState(() => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`; // YYYY-MM-DD
+});
+const [exCourtIndex, setExCourtIndex] = useState(0);
+const [exFromTime, setExFromTime] = useState("18:00");
+const [exToTime, setExToTime] = useState("20:00");
+const [exReason, setExReason] = useState("");
+const [exceptions, setExceptions] = useState([]);
+const [loadingExceptions, setLoadingExceptions] = useState(false);
+
   if (!isAdmin) {
     return (
       <View style={styles.container}>
@@ -115,6 +130,43 @@ export default function AdminSettingsScreen({ route, navigation }) {
     }
   };
 
+// ---- weekly_block_exceptions laden (für ein bestimmtes Datum) ----
+const loadExceptionsForDate = async (dateKey) => {
+  setLoadingExceptions(true);
+  try {
+    const { data, error } = await supabase
+      .from("weekly_block_exceptions")
+      .select("*")
+      .eq("date_key", dateKey)
+      .order("court_index", { ascending: true })
+      .order("from_time", { ascending: true });
+
+    if (error) {
+      console.log("weekly_block_exceptions load error:", error.message);
+      Alert.alert("DB-Fehler (Ausnahmen laden)", error.message);
+      setExceptions([]);
+      return;
+    }
+
+    const mapped = (data || []).map((row) => ({
+      id: row.id,
+      dateKey: row.date_key,
+      courtIndex: row.court_index,
+      from: row.from_time,
+      to: row.to_time,
+      reason: row.reason || "",
+    }));
+
+    setExceptions(mapped);
+  } catch (e) {
+    console.log("weekly_block_exceptions load exception:", e);
+    Alert.alert("DB-Fehler (Ausnahmen Exception)", String(e));
+    setExceptions([]);
+  } finally {
+    setLoadingExceptions(false);
+  }
+};
+
   // ---- Users laden ----
   const loadUsers = async () => {
     setLoadingUsers(true);
@@ -137,11 +189,18 @@ export default function AdminSettingsScreen({ route, navigation }) {
     }
   };
 
-  useEffect(() => {
-    loadWeeklyRules();
-    loadUsers();
-    loadMaxHours();
-  }, []);
+ useEffect(() => {
+  loadWeeklyRules();
+  loadUsers();
+  loadMaxHours();
+  loadExceptionsForDate(exDateKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, []);
+
+useEffect(() => {
+  loadExceptionsForDate(exDateKey);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [exDateKey]);
 
   // ---- neue Auto-Regel speichern ----
   const handleAddRule = async () => {
@@ -226,6 +285,74 @@ export default function AdminSettingsScreen({ route, navigation }) {
       Alert.alert("Fehler", "Regel konnte nicht gelöscht werden.");
     }
   };
+
+  // ---- Ausnahme hinzufügen (einmalig für ein Datum) ----
+const handleAddException = async () => {
+  if (!exDateKey.match(/^\d{4}-\d{2}-\d{2}$/)) {
+    Alert.alert("Datum falsch", "Bitte Datum im Format YYYY-MM-DD eingeben.");
+    return;
+  }
+  if (!exFromTime.match(/^\d{2}:\d{2}$/) || !exToTime.match(/^\d{2}:\d{2}$/)) {
+    Alert.alert("Zeitformat falsch", "Bitte Zeit im Format HH:MM eingeben, z.B. 18:00.");
+    return;
+  }
+  if (exToTime <= exFromTime) {
+    Alert.alert("Ungültiger Bereich", "Endzeit muss nach der Startzeit liegen.");
+    return;
+  }
+
+  try {
+    const row = {
+      date_key: exDateKey,
+      court_index: exCourtIndex,
+      from_time: exFromTime,
+      to_time: exToTime,
+      reason: exReason.trim() || null,
+    };
+
+    const { error } = await supabase
+      .from("weekly_block_exceptions")
+      .insert([row]);
+
+    if (error) {
+      console.log("Insert exception error:", error.message);
+      Alert.alert("Fehler", "Ausnahme konnte nicht gespeichert werden.");
+      return;
+    }
+
+    setExReason("");
+    await loadExceptionsForDate(exDateKey);
+
+    Alert.alert(
+      "Ausnahme gespeichert",
+      `Ausnahme für ${COURTS[exCourtIndex]} am ${exDateKey} von ${exFromTime} bis ${exToTime}.`
+    );
+  } catch (e) {
+    console.log("Insert exception exception:", e);
+    Alert.alert("Fehler", "Ausnahme konnte nicht gespeichert werden.");
+  }
+};
+
+// ---- Ausnahme löschen ----
+const handleDeleteException = async (id) => {
+  try {
+    const { error } = await supabase
+      .from("weekly_block_exceptions")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.log("Delete exception error:", error.message);
+      Alert.alert("Fehler", "Ausnahme konnte nicht gelöscht werden.");
+      return;
+    }
+
+    await loadExceptionsForDate(exDateKey);
+  } catch (e) {
+    console.log("Delete exception exception:", e);
+    Alert.alert("Fehler", "Ausnahme konnte nicht gelöscht werden.");
+  }
+};
 
   // ---- Nutzerstatus ändern ----
   const updateUserStatus = async (id, newStatus) => {
@@ -417,7 +544,101 @@ export default function AdminSettingsScreen({ route, navigation }) {
               <Text style={styles.maxButtonText}>+</Text>
             </TouchableOpacity>
           </View>
+<Text style={[styles.sectionTitle, { marginTop: 16 }]}>
+  Ausnahmen für einzelne Tage (Weekly-Block aussetzen)
+</Text>
 
+<Text style={styles.rulesEmpty}>
+  Diese Ausnahmen heben Weekly-Blocks nur für ein bestimmtes Datum auf.
+</Text>
+
+<Text style={styles.label}>Datum (YYYY-MM-DD)</Text>
+<TextInput
+  style={styles.input}
+  value={exDateKey}
+  onChangeText={setExDateKey}
+  placeholder="z.B. 2026-06-20"
+  placeholderTextColor="#9fb0c8"
+/>
+
+<Text style={styles.label}>Platz</Text>
+<View style={styles.rowBtns}>
+  {COURTS.map((court, idx) => {
+    const active = idx === exCourtIndex;
+    return (
+      <TouchableOpacity
+        key={court}
+        style={[styles.chip, active && styles.chipActive]}
+        onPress={() => setExCourtIndex(idx)}
+      >
+        <Text style={[styles.chipText, active && styles.chipTextActive]}>
+          {court}
+        </Text>
+      </TouchableOpacity>
+    );
+  })}
+</View>
+
+<Text style={styles.label}>Von (HH:MM)</Text>
+<TextInput
+  style={styles.input}
+  value={exFromTime}
+  onChangeText={setExFromTime}
+  placeholder="z.B. 18:00"
+  placeholderTextColor="#9fb0c8"
+/>
+
+<Text style={styles.label}>Bis (HH:MM)</Text>
+<TextInput
+  style={styles.input}
+  value={exToTime}
+  onChangeText={setExToTime}
+  placeholder="z.B. 20:00"
+  placeholderTextColor="#9fb0c8"
+/>
+
+<Text style={styles.label}>Grund (optional)</Text>
+<TextInput
+  style={styles.input}
+  value={exReason}
+  onChangeText={setExReason}
+  placeholder='z.B. "Training fällt aus"'
+  placeholderTextColor="#9fb0c8"
+/>
+
+<TouchableOpacity style={styles.addBtn} onPress={handleAddException}>
+  <Text style={styles.addBtnText}>Ausnahme hinzufügen</Text>
+</TouchableOpacity>
+
+<View style={{ marginTop: 10 }}>
+  <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+    <Text style={[styles.sectionTitle, { marginBottom: 0 }]}>
+      Ausnahmen am {exDateKey}
+    </Text>
+    <TouchableOpacity style={styles.reloadBtn} onPress={() => loadExceptionsForDate(exDateKey)}>
+      <Text style={styles.reloadText}>{loadingExceptions ? "..." : "Neu laden"}</Text>
+    </TouchableOpacity>
+  </View>
+
+  {exceptions.length === 0 ? (
+    <Text style={styles.rulesEmpty}>Keine Ausnahmen für dieses Datum.</Text>
+  ) : (
+    exceptions.map((ex) => (
+      <View key={ex.id} style={styles.ruleCard}>
+        <Text style={styles.ruleText}>
+          {COURTS[ex.courtIndex]} · {ex.from}–{ex.to}
+          {ex.reason ? ` – ${ex.reason}` : ""}
+        </Text>
+        <TouchableOpacity
+          style={styles.ruleDeleteBtn}
+          onPress={() => handleDeleteException(ex.id)}
+        >
+          <Text style={styles.ruleDeleteText}>Löschen</Text>
+        </TouchableOpacity>
+      </View>
+    ))
+  )}
+</View>
           <Text style={[styles.sectionTitle, { marginTop: 16 }]}>
             Aktive automatische Sperrzeiten
           </Text>

@@ -107,6 +107,7 @@ const lastFetchWarnRef = useRef(0);
   const [bookings, setBookings] = useState([]);
   const [blockedSlots, setBlockedSlots] = useState([]);
   const [weeklyRules, setWeeklyRules] = useState([]);
+  const [weeklyExceptions, setWeeklyExceptions] = useState([]);
 
   const [courtClosures, setCourtClosures] = useState({ 0: false, 1: false, 2: false });
 const [courtClosureReason, setCourtClosureReason] = useState({ 0: "", 1: "", 2: "" });
@@ -365,11 +366,12 @@ const loadBookingsForDate = async (dateKey) => {
 useEffect(() => {
   if (!sessionReady) return;
 
-  const interval = setInterval(() => {
-    loadBookingsForDate(currentDateKey);
-    loadWeeklyRules();
-    loadCourtClosures(); // ✅ NEU
-  }, 5000);
+const interval = setInterval(() => {
+  loadBookingsForDate(currentDateKey);
+  loadWeeklyRules();
+  loadWeeklyExceptions(currentDateKey);
+  loadCourtClosures(); // ✅ NEU
+}, 5000);
 
   return () => clearInterval(interval);
 }, [currentDateKey, sessionReady]);
@@ -377,6 +379,7 @@ useEffect(() => {
 useEffect(() => {
   if (!sessionReady) return;
   loadBookingsForDate(currentDateKey);
+  loadWeeklyExceptions(currentDateKey);
   loadCourtClosures(); // ✅ NEU
 }, [currentDateKey, sessionReady]);
 
@@ -393,6 +396,7 @@ useEffect(() => {
 
       loadBookingsForDate(currentDateKey);
       loadWeeklyRules();
+      loadWeeklyExceptions(currentDateKey);
     }, 600);
   };
 
@@ -444,6 +448,31 @@ useEffect(() => {
 }
   };
 
+  const loadWeeklyExceptions = async (dateKey) => {
+  try {
+    const { data, error } = await supabase
+      .from("weekly_block_exceptions")
+      .select("court_index, from_time, to_time, reason")
+      .eq("date_key", dateKey);
+
+    if (error) {
+      console.log("weekly_block_exceptions load error:", error.message);
+      return;
+    }
+
+    const mapped = (data || []).map((r) => ({
+      courtIndex: r.court_index,
+      from: r.from_time,
+      to: r.to_time,
+      reason: r.reason || "",
+    }));
+
+    setWeeklyExceptions(mapped);
+  } catch (e) {
+    console.log("weekly_block_exceptions load exception:", String(e));
+  }
+};
+
 const loadCourtClosures = async () => {
   try {
     const { data, error } = await supabase
@@ -454,70 +483,6 @@ const loadCourtClosures = async () => {
       console.log("court_closures load error:", error.message);
       return;
     }
-
-    const loadAllUsers = async () => {
-  setUsersLoading(true);
-
-  // Wir probieren mehrere Tabellen/Spalten, damit es bei dir sicher läuft:
-  // 1) profiles.display_name
-  // 2) users.name
-  // 3) users.display_name
-  // 4) lk_profiles.display_name (Fallback, falls es nix anderes gibt)
-  const tries = [
-    { table: "profiles", nameField: "display_name", idField: "user_id" },
-    { table: "users", nameField: "name", idField: "id" },
-    { table: "users", nameField: "display_name", idField: "id" },
-    { table: "lk_profiles", nameField: "display_name", idField: "user_id" },
-  ];
-
-  try {
-    for (const t of tries) {
-      const selectCols = `${t.idField}, ${t.nameField}`;
-      const { data, error } = await supabase.from(t.table).select(selectCols);
-
-      if (error) {
-        console.log(`loadAllUsers: ${t.table} failed:`, error.message);
-        continue; // nächster Versuch
-      }
-
-      const cleaned = (data || [])
-        .map((r) => ({
-          id: r?.[t.idField] ?? null,
-          name: String(r?.[t.nameField] || "").trim(),
-        }))
-        .filter((u) => u.name.length > 0)
-        .filter((u) => (myUserId ? u.id !== myUserId : true));
-
-      // Duplikate entfernen (case-insensitive)
-      const seen = new Set();
-      const unique = [];
-      for (const u of cleaned) {
-        const key = u.name.toLowerCase();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        unique.push(u);
-      }
-
-      unique.sort((a, b) => a.name.localeCompare(b.name, "de"));
-
-      setAllUsers(unique);
-      setUsersLoading(false);
-      return; // ✅ fertig
-    }
-
-    // Wenn alles fehlschlägt:
-    setAllUsers([]);
-    setUsersLoading(false);
-    showMessage(
-      "Spielerliste nicht verfügbar",
-      "Ich konnte keine Userliste laden. (Wahrscheinlich fehlen Rechte/Policy für die Users-Tabelle.)"
-    );
-  } catch (e) {
-    setUsersLoading(false);
-    console.log("loadAllUsers exception:", String(e));
-    showMessage("Fehler", String(e));
-  }
-};
 
     const map = { 0: false, 1: false, 2: false };
     const reasons = { 0: "", 1: "", 2: "" };
@@ -582,8 +547,22 @@ const loadCourtClosures = async () => {
     });
   };
 
-  const isAutomaticallyBlocked = (courtIndex, time) =>
-    !!getAutoRuleForSlot(courtIndex, time);
+  const isExceptionForSlot = (courtIndex, time) => {
+  return weeklyExceptions.some((ex) => {
+    if (ex.courtIndex !== courtIndex) return false;
+    return time >= ex.from && time < ex.to;
+  });
+};
+
+  const isAutomaticallyBlocked = (courtIndex, time) => {
+  const hasWeekly = !!getAutoRuleForSlot(courtIndex, time);
+  if (!hasWeekly) return false;
+
+  // ✅ Ausnahme schlägt Weekly Block (für genau dieses Datum)
+  if (isExceptionForSlot(courtIndex, time)) return false;
+
+  return true;
+};
 
 const isCourtClosed = (courtIndex) => !!courtClosures?.[courtIndex];
 
