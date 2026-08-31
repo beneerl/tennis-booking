@@ -14,6 +14,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useFocusEffect } from "@react-navigation/native";
 import { supabase } from "../supabaseClient";
+import { Ionicons } from "@expo/vector-icons";
 
 // Alerts, die auf Web UND Handy funktionieren
 function showMessage(title, message) {
@@ -351,58 +352,84 @@ if (signInAfterSignUpErr) {
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
-      <Text style={styles.title}>Tennis-Platzreservierung</Text>
-      <Text style={styles.subtitle}>Tacherting</Text>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Anmeldung</Text>
+      <View style={styles.loginShell}>
+        <View style={styles.brandMark}>
+          <Ionicons name="tennisball-outline" size={33} color="#F28B25" />
+        </View>
+        <Text style={styles.title}>Tennis Booking</Text>
+        <Text style={styles.subtitle}>Tacherting · Platzreservierung</Text>
 
-        <Text style={styles.label}>E-Mail</Text>
-        <TextInput
-          style={styles.input}
-          value={email}
-          onChangeText={setEmail}
-          placeholder="z.B. bene@example.com"
-          placeholderTextColor="#9fb0c8"
-          keyboardType="email-address"
-          autoCapitalize="none"
-        />
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>Willkommen</Text>
+            <Text style={styles.cardSubtitle}>Melde dich an oder registriere dich als neues Vereinsmitglied.</Text>
+          </View>
 
-        <Text style={styles.label}>Name (nur bei neuer Registrierung)</Text>
-        <TextInput
-          style={styles.input}
-          value={name}
-          onChangeText={setName}
-          placeholder="z.B. Benedikt Erl"
-          placeholderTextColor="#9fb0c8"
-        />
+          <Text style={styles.label}>E-Mail</Text>
+          <View style={styles.inputWrap}>
+            <Ionicons name="mail-outline" size={18} color="#6F86A8" />
+            <TextInput
+              style={styles.input}
+              value={email}
+              onChangeText={setEmail}
+              placeholder="name@beispiel.de"
+              placeholderTextColor="#6F86A8"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+          </View>
 
-        <Text style={styles.label}>Passwort</Text>
-        <TextInput
-          style={styles.input}
-          value={pin}
-          onChangeText={setPin}
-          placeholder="min. 6 Zeichen"
-          placeholderTextColor="#9fb0c8"
-          secureTextEntry
-        />
+          <Text style={styles.label}>Name</Text>
+          <View style={styles.inputWrap}>
+            <Ionicons name="person-outline" size={18} color="#6F86A8" />
+            <TextInput
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              placeholder="Nur bei neuer Registrierung nötig"
+              placeholderTextColor="#6F86A8"
+            />
+          </View>
 
-        <TouchableOpacity
-          style={styles.loginButton}
-          onPress={handleLogin}
-          disabled={loading}
-        >
-          {loading ? (
-            <ActivityIndicator color="#ffffff" />
-          ) : (
-            <Text style={styles.loginButtonText}>Weiter</Text>
-          )}
-        </TouchableOpacity>
+          <Text style={styles.label}>Passwort</Text>
+          <View style={styles.inputWrap}>
+            <Ionicons name="lock-closed-outline" size={18} color="#6F86A8" />
+            <TextInput
+              style={styles.input}
+              value={pin}
+              onChangeText={setPin}
+              placeholder="Mindestens 6 Zeichen"
+              placeholderTextColor="#6F86A8"
+              secureTextEntry
+            />
+          </View>
 
-        <Text style={styles.infoText}>
-          Neue Spieler werden registriert und anschließend vom Admin
-          freigeschaltet. Login erfolgt mit E-Mail + Passwort.
-        </Text>
+          <TouchableOpacity
+            style={[styles.loginButton, loading && styles.loginButtonDisabled]}
+            onPress={handleLogin}
+            disabled={loading}
+            activeOpacity={0.88}
+          >
+            {loading ? (
+              <ActivityIndicator color="#001738" />
+            ) : (
+              <>
+                <Text style={styles.loginButtonText}>Weiter</Text>
+                <Ionicons name="arrow-forward" size={18} color="#001738" />
+              </>
+            )}
+          </TouchableOpacity>
+
+          <View style={styles.infoBox}>
+            <Ionicons name="information-circle-outline" size={17} color="#7F93B0" />
+            <Text style={styles.infoText}>
+              Neue Accounts werden nach der Registrierung einmalig vom Admin freigeschaltet.
+            </Text>
+          </View>
+        </View>
+
+        <Text style={styles.footerText}>TEG Altstadt · Tennis</Text>
       </View>
     </View>
   );
@@ -411,68 +438,72 @@ if (signInAfterSignUpErr) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#001738",
+    backgroundColor: "#00152F",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: 18,
+    paddingVertical: 28,
   },
-  title: {
-    color: "#ffffff",
-    fontSize: 22,
-    fontWeight: "700",
+  loginShell: { width: "100%", maxWidth: 440, alignItems: "center" },
+  brandMark: {
+    width: 66,
+    height: 66,
+    borderRadius: 22,
+    backgroundColor: "#082A52",
+    borderWidth: 1,
+    borderColor: "#173F69",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 13,
   },
-  subtitle: {
-    color: "#c3d0ea",
-    fontSize: 14,
-    marginBottom: 16,
-  },
+  title: { color: "#FFFFFF", fontSize: 28, fontWeight: "900", letterSpacing: -0.6 },
+  subtitle: { color: "#7F93B0", fontSize: 12, marginTop: 3, marginBottom: 22, fontWeight: "700" },
   card: {
     width: "100%",
-    backgroundColor: "#022449",
-    borderRadius: 16,
-    padding: 16,
+    backgroundColor: "#062447",
+    borderRadius: 24,
+    padding: 18,
     borderWidth: 1,
-    borderColor: "#355a8a",
+    borderColor: "#173F69",
   },
-  cardTitle: {
-    color: "#ffffff",
-    fontSize: 18,
-    fontWeight: "700",
-    marginBottom: 10,
-    textAlign: "center",
-  },
-  label: {
-    color: "#d6e0f0",
-    fontSize: 13,
-    marginTop: 6,
-    marginBottom: 4,
-  },
-  input: {
-    backgroundColor: "#001738",
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    color: "#ffffff",
-    borderWidth: 1,
-    borderColor: "#355a8a",
-    fontSize: 16,
-  },
-  loginButton: {
-    marginTop: 16,
-    backgroundColor: "#f28b25",
-    borderRadius: 999,
-    paddingVertical: 10,
+  cardHeader: { marginBottom: 12 },
+  cardTitle: { color: "#FFFFFF", fontSize: 20, fontWeight: "900" },
+  cardSubtitle: { color: "#8EA2BB", fontSize: 11.5, lineHeight: 17, marginTop: 4 },
+  label: { color: "#C7D4E3", fontSize: 11, fontWeight: "900", marginTop: 10, marginBottom: 6 },
+  inputWrap: {
+    minHeight: 48,
+    flexDirection: "row",
     alignItems: "center",
+    gap: 9,
+    backgroundColor: "#031B36",
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderColor: "#123B63",
   },
-  loginButtonText: {
-    color: "#001738",
-    fontSize: 16,
-    fontWeight: "700",
+  input: { flex: 1, color: "#FFFFFF", fontSize: 14, paddingVertical: 11 },
+  loginButton: {
+    minHeight: 50,
+    marginTop: 18,
+    backgroundColor: "#F28B25",
+    borderRadius: 15,
+    flexDirection: "row",
+    gap: 8,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  infoText: {
-    color: "#9fb0c8",
-    fontSize: 11,
-    marginTop: 10,
-    textAlign: "center",
+  loginButtonDisabled: { opacity: 0.7 },
+  loginButtonText: { color: "#001738", fontSize: 14, fontWeight: "900" },
+  infoBox: {
+    marginTop: 14,
+    paddingHorizontal: 11,
+    paddingVertical: 10,
+    borderRadius: 13,
+    backgroundColor: "rgba(255,255,255,0.025)",
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 8,
   },
+  infoText: { flex: 1, color: "#8398B2", fontSize: 10.5, lineHeight: 15 },
+  footerText: { color: "#536B88", fontSize: 10, fontWeight: "800", marginTop: 16, letterSpacing: 0.8 },
 });

@@ -41,6 +41,16 @@ export default function App() {
     document.body.style.height = "100%";
     document.body.style.margin = "0";
     document.body.style.overscrollBehavior = "none";
+    document.body.style.background = "#000B1B";
+
+    const root = document.getElementById("root");
+    if (root) {
+      root.style.height = "100%";
+      root.style.maxWidth = "560px";
+      root.style.margin = "0 auto";
+      root.style.background = "#00152F";
+      root.style.boxShadow = "0 0 60px rgba(0,0,0,0.28)";
+    }
   }
 
   return (

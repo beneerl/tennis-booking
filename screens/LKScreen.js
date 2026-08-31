@@ -17,6 +17,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
 import { supabase } from "../supabaseClient";
 import { getCurrentUserProfile, normalizeUserStatus } from "../authProfile";
+import { Ionicons } from "@expo/vector-icons";
+import BottomNav from "../components/BottomNav";
 
 
 const STORAGE_PROFILE = "lk_profile_v1";
@@ -463,11 +465,14 @@ useEffect(() => {
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
         <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={styles.backText}>{"< Zurück"}</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>LK</Text>
-          <View style={{ width: 70 }} />
+          <View style={styles.headerIconSpacer} />
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerTitle}>LK</Text>
+            <Text style={styles.headerSubtitle}>Rechner & Rangliste</Text>
+          </View>
+          <View style={styles.headerIconWrap}>
+            <Ionicons name="stats-chart-outline" size={20} color="#F28B25" />
+          </View>
         </View>
         <Text style={styles.muted}>Lade…</Text>
       </View>
@@ -480,11 +485,14 @@ useEffect(() => {
 
       {/* Header */}
       <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>{"< Zurück"}</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>LK</Text>
-        <View style={{ width: 70 }} />
+        <View style={styles.headerIconSpacer} />
+        <View style={styles.headerCenter}>
+          <Text style={styles.headerTitle}>LK</Text>
+          <Text style={styles.headerSubtitle}>Rechner & Rangliste</Text>
+        </View>
+        <View style={styles.headerIconWrap}>
+          <Ionicons name="stats-chart-outline" size={20} color="#F28B25" />
+        </View>
       </View>
 
       {/* Tabs */}
@@ -493,7 +501,7 @@ useEffect(() => {
         <TabButton label="Rangliste" active={tab === "board"} onPress={() => setTab("board")} />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 24 }}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24, paddingHorizontal: 14 }}>
         {tab === "calc" && (
           <>
             <View style={styles.card}>
@@ -780,43 +788,47 @@ useEffect(() => {
         </View>
       )}
 
+      <BottomNav navigation={navigation} active="LK" />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#001738", paddingTop: 40, paddingHorizontal: 14 },
+  container: { flex: 1, backgroundColor: "#00152F", paddingTop: 40 },
 
   headerRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 12,
+    paddingHorizontal: 14,
   },
-  backBtn: { paddingVertical: 8, paddingRight: 12 },
-  backText: { color: "#f28b25", fontSize: 14, fontWeight: "700" },
-  headerTitle: { color: "#ffffff", fontSize: 18, fontWeight: "900", flex: 1, textAlign: "center" },
+  headerIconSpacer: { width: 40, height: 40 },
+  headerCenter: { flex: 1, alignItems: "center" },
+  headerIconWrap: { width: 40, height: 40, borderRadius: 13, backgroundColor: "#082A52", borderWidth: 1, borderColor: "#173F69", alignItems: "center", justifyContent: "center" },
+  headerTitle: { color: "#ffffff", fontSize: 19, fontWeight: "900" },
+  headerSubtitle: { color: "#7187A4", fontSize: 10, marginTop: 2, fontWeight: "700" },
 
-  tabsRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
+  tabsRow: { flexDirection: "row", gap: 8, marginBottom: 10, paddingHorizontal: 14 },
   tabBtn: {
     flex: 1,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#355a8a",
+    borderColor: "#173F69",
     paddingVertical: 10,
     alignItems: "center",
-    backgroundColor: "rgba(8, 35, 80, 0.55)",
+    backgroundColor: "#082A52",
   },
-  tabBtnActive: { backgroundColor: "#f28b25", borderColor: "#f28b25" },
+  tabBtnActive: { backgroundColor: "#F28B25", borderColor: "#F28B25" },
   tabText: { color: "#ffffff", fontSize: 13, fontWeight: "900" },
   tabTextActive: { color: "#001738" },
 
   card: {
-    backgroundColor: "#022449",
+    backgroundColor: "#062447",
     borderRadius: 18,
     padding: 14,
     borderWidth: 1,
-    borderColor: "#355a8a",
+    borderColor: "#173F69",
     marginBottom: 12,
   },
   cardTitle: { color: "#fff", fontSize: 14, fontWeight: "900", marginBottom: 10 },
@@ -824,14 +836,14 @@ const styles = StyleSheet.create({
 
   input: {
     borderWidth: 1,
-    borderColor: "#355a8a",
+    borderColor: "#173F69",
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
     color: "#fff",
     fontWeight: "800",
   },
-  bigLK: { marginTop: 10, color: "#f28b25", fontSize: 28, fontWeight: "900", textAlign: "center" },
+  bigLK: { marginTop: 10, color: "#F28B25", fontSize: 28, fontWeight: "900", textAlign: "center" },
 
   row: { marginTop: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
   rowLabel: { color: "#c3d0ea", fontSize: 12, fontWeight: "800", flex: 1 },
@@ -845,18 +857,18 @@ const styles = StyleSheet.create({
     flex: 1,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#355a8a",
+    borderColor: "#173F69",
     paddingVertical: 10,
     alignItems: "center",
-    backgroundColor: "rgba(8, 35, 80, 0.55)",
+    backgroundColor: "#082A52",
   },
-  segActive: { backgroundColor: "#f28b25", borderColor: "#f28b25" },
+  segActive: { backgroundColor: "#F28B25", borderColor: "#F28B25" },
   segText: { color: "#fff", fontSize: 13, fontWeight: "900" },
   segTextActive: { color: "#001738" },
 
   primaryBtn: {
     marginTop: 12,
-    backgroundColor: "#f28b25",
+    backgroundColor: "#F28B25",
     borderRadius: 14,
     paddingVertical: 12,
     alignItems: "center",
@@ -867,7 +879,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#355a8a",
+    borderColor: "#173F69",
     paddingVertical: 12,
     alignItems: "center",
   },
@@ -900,7 +912,7 @@ const styles = StyleSheet.create({
     height: 34,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#355a8a",
+    borderColor: "#173F69",
     alignItems: "center",
     justifyContent: "center",
   },
@@ -909,17 +921,17 @@ const styles = StyleSheet.create({
   boardRank: { width: 36, color: "#9fb0c8", fontWeight: "900" },
   boardName: { color: "#ffffff", fontWeight: "900" },
   boardMeta: { color: "#9fb0c8", marginTop: 2, fontSize: 11, fontWeight: "800" },
-  boardLK: { color: "#f28b25", fontWeight: "900", fontSize: 14 },
+  boardLK: { color: "#F28B25", fontWeight: "900", fontSize: 14 },
 
   // Partner Picker Modal
   pickBtn: {
     marginTop: 8,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#355a8a",
+    borderColor: "#173F69",
     paddingVertical: 10,
     alignItems: "center",
-    backgroundColor: "rgba(8, 35, 80, 0.55)",
+    backgroundColor: "#082A52",
   },
   pickBtnText: { color: "#ffffff", fontWeight: "900" },
 
@@ -939,7 +951,7 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     padding: 16,
     borderWidth: 1,
-    borderColor: "#355a8a",
+    borderColor: "#173F69",
     marginBottom: 24,
   },
   modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
@@ -950,7 +962,7 @@ const styles = StyleSheet.create({
   searchInput: {
     marginTop: 10,
     borderWidth: 1,
-    borderColor: "#355a8a",
+    borderColor: "#173F69",
     borderRadius: 14,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -964,12 +976,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: "#355a8a",
-    backgroundColor: "rgba(8, 35, 80, 0.55)",
+    borderColor: "#173F69",
+    backgroundColor: "#082A52",
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   pickerName: { color: "#fff", fontWeight: "900", flex: 1, paddingRight: 10 },
-  pickerLK: { color: "#f28b25", fontWeight: "900" },
+  pickerLK: { color: "#F28B25", fontWeight: "900" },
 });

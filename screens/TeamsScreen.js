@@ -6,7 +6,10 @@ import {
   StyleSheet,
   StatusBar,
   ScrollView,
+  Platform,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import BottomNav from "../components/BottomNav";
 
 export default function TeamsScreen({ navigation }) {
   const [category, setCategory] = useState(null); // "herren" | "mixed" | null
@@ -19,8 +22,8 @@ export default function TeamsScreen({ navigation }) {
   }, [category, season]);
 
   const breadcrumb = useMemo(() => {
-    if (step === "CATEGORY") return "Auswahl";
-    if (step === "SEASON") return "Herren · Saison";
+    if (step === "CATEGORY") return "Mannschaften & Spielpläne";
+    if (step === "SEASON") return "Herren · Saison auswählen";
     if (category === "herren") return `Herren · ${season === "sommer" ? "Sommer" : "Winter"}`;
     return "Mixed";
   }, [step, category, season]);
@@ -40,252 +43,188 @@ export default function TeamsScreen({ navigation }) {
       setSeason(null);
       return;
     }
-    navigation.goBack();
+    navigation.navigate("Booking");
   };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* Header */}
       <View style={styles.headerRow}>
-        <TouchableOpacity onPress={goBackSmart} style={styles.backBtn}>
-          <Text style={styles.backText}>{"< Zurück"}</Text>
-        </TouchableOpacity>
+        {step !== "CATEGORY" ? (
+          <TouchableOpacity onPress={goBackSmart} style={styles.headerIconBtn} activeOpacity={0.85}>
+            <Ionicons name="chevron-back" size={20} color="#F28B25" />
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.headerIconSpacer} />
+        )}
 
-        <View style={{ alignItems: "center" }}>
-          <Text style={styles.title}>Mannschaften</Text>
+        <View style={styles.headerCenter}>
+          <Text style={styles.title}>Teams</Text>
           <Text style={styles.breadcrumb}>{breadcrumb}</Text>
         </View>
 
-        <View style={{ width: 70 }} />
+        <View style={styles.headerIconSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 30 }}>
-        {/* STEP 1: CATEGORY */}
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {step === "CATEGORY" && (
           <>
-            
+            <Text style={styles.eyebrow}>ÜBERSICHT</Text>
+            <Text style={styles.sectionHeading}>Welche Mannschaft suchst du?</Text>
+            <Text style={styles.sectionIntro}>Spielpläne, Ergebnisse und Teamdetails an einem Ort.</Text>
 
-            <TouchableOpacity
-              style={styles.bigCard}
+            <CategoryCard
+              icon="people-outline"
+              title="Herren"
+              subtitle="Sommer & Winter"
+              hint="Saison auswählen"
               onPress={() => {
                 setCategory("herren");
                 setSeason(null);
               }}
-              activeOpacity={0.9}
-            >
-              <View style={styles.bigCardTop}>
-                <Text style={styles.bigEmoji}>🎾</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.bigTitle}>Herren</Text>
-                  <Text style={styles.bigSub}>Sommer & Winter</Text>
-                </View>
-                <Text style={styles.chev}>›</Text>
-              </View>
+            />
 
-              <View style={styles.bigCardBottom}>
-                <Text style={styles.hint}>Tippe für Saison-Auswahl</Text>
-              </View>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.bigCard}
+            <CategoryCard
+              icon="git-compare-outline"
+              title="Mixed"
+              subtitle="Mixed I & Mixed II"
+              hint="Team auswählen"
               onPress={() => {
                 setCategory("mixed");
                 setSeason(null);
               }}
-              activeOpacity={0.9}
-            >
-              <View style={styles.bigCardTop}>
-                <Text style={styles.bigEmoji}>🤝</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.bigTitle}>Mixed</Text>
-                  <Text style={styles.bigSub}>Mixed I & Mixed II</Text>
-                </View>
-                <Text style={styles.chev}>›</Text>
-              </View>
-
-              <View style={styles.bigCardBottom}>
-                <Text style={styles.hint}>Tippe für Team-Auswahl</Text>
-              </View>
-            </TouchableOpacity>
+            />
           </>
         )}
 
-        {/* STEP 2: SEASON */}
         {step === "SEASON" && (
           <>
-            <Text style={styles.sectionTitle}>Wähle die Saison</Text>
+            <Text style={styles.eyebrow}>HERREN</Text>
+            <Text style={styles.sectionHeading}>Saison auswählen</Text>
+            <Text style={styles.sectionIntro}>Wähle den Wettbewerb, den du ansehen möchtest.</Text>
 
-            <View style={styles.chipsRow}>
-              <Chip
-                label="Sommer"
-                active={season === "sommer"}
+            <View style={styles.seasonGrid}>
+              <SeasonCard
+                icon="sunny-outline"
+                title="Sommer"
+                subtitle="Freiluft-Saison"
                 onPress={() => setSeason("sommer")}
               />
-              <Chip
-                label="Winter"
-                active={season === "winter"}
+              <SeasonCard
+                icon="snow-outline"
+                title="Winter"
+                subtitle="Hallen-Saison"
                 onPress={() => setSeason("winter")}
               />
             </View>
-
-
           </>
         )}
 
-        {/* STEP 3: TEAMS */}
         {step === "TEAMS" && (
           <>
-            <Text style={styles.sectionTitle}>Teams</Text>
+            <Text style={styles.eyebrow}>MANNSCHAFTEN</Text>
+            <Text style={styles.sectionHeading}>Team auswählen</Text>
+            <Text style={styles.sectionIntro}>Tippe auf ein Team für Spielplan und Details.</Text>
 
-            {/* Herren Sommer */}
             {category === "herren" && season === "sommer" && (
               <>
-                <TeamCard
-                  title="Herren I"
-                  subtitle="Sommer"
-                  onPress={() => goTeam("herren_s1", "Herren I (Sommer)")}
-                />
-                <TeamCard
-                  title="Herren II"
-                  subtitle="Sommer"
-                  onPress={() => goTeam("herren_s2", "Herren II (Sommer)")}
-                />
+                <TeamCard title="Herren I" subtitle="Sommer" onPress={() => goTeam("herren_s1", "Herren I (Sommer)")} />
+                <TeamCard title="Herren II" subtitle="Sommer" onPress={() => goTeam("herren_s2", "Herren II (Sommer)")} />
               </>
             )}
 
-            {/* Herren Winter */}
             {category === "herren" && season === "winter" && (
-              <TeamCard
-                title="Herren"
-                subtitle="Winter"
-                onPress={() => goTeam("herren_w1", "Herren (Winter)")}
-              />
+              <TeamCard title="Herren" subtitle="Winter" onPress={() => goTeam("herren_w1", "Herren (Winter)")} />
             )}
 
-            {/* Mixed */}
             {category === "mixed" && (
               <>
-                <TeamCard
-                  title="Mixed I"
-                  subtitle="Liga/Spielplan"
-                  onPress={() => goTeam("mixed_1", "Mixed I")}
-                />
-                <TeamCard
-                  title="Mixed II"
-                  subtitle="Liga/Spielplan"
-                  onPress={() => goTeam("mixed_2", "Mixed II")}
-                />
+                <TeamCard title="Mixed I" subtitle="Liga & Spielplan" onPress={() => goTeam("mixed_1", "Mixed I")} />
+                <TeamCard title="Mixed II" subtitle="Liga & Spielplan" onPress={() => goTeam("mixed_2", "Mixed II")} />
               </>
             )}
-
-
           </>
         )}
       </ScrollView>
+
+      <BottomNav navigation={navigation} active="Teams" />
     </View>
   );
 }
 
-function Chip({ label, active, onPress }) {
+function CategoryCard({ icon, title, subtitle, hint, onPress }) {
   return (
-    <TouchableOpacity
-      onPress={onPress}
-      style={[styles.chip, active && styles.chipActive]}
-      activeOpacity={0.9}
-    >
-      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+    <TouchableOpacity style={styles.bigCard} onPress={onPress} activeOpacity={0.86}>
+      <View style={styles.cardIcon}>
+        <Ionicons name={icon} size={24} color="#F28B25" />
+      </View>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.bigTitle}>{title}</Text>
+        <Text style={styles.bigSub}>{subtitle}</Text>
+        <Text style={styles.hint}>{hint}</Text>
+      </View>
+      <View style={styles.chevWrap}>
+        <Ionicons name="chevron-forward" size={19} color="#F28B25" />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function SeasonCard({ icon, title, subtitle, onPress }) {
+  return (
+    <TouchableOpacity style={styles.seasonCard} onPress={onPress} activeOpacity={0.86}>
+      <View style={styles.seasonIcon}>
+        <Ionicons name={icon} size={24} color="#F28B25" />
+      </View>
+      <Text style={styles.seasonTitle}>{title}</Text>
+      <Text style={styles.seasonSub}>{subtitle}</Text>
+      <Ionicons name="arrow-forward" size={18} color="#7187A4" style={{ marginTop: 13 }} />
     </TouchableOpacity>
   );
 }
 
 function TeamCard({ title, subtitle, onPress }) {
   return (
-    <TouchableOpacity style={styles.teamCard} onPress={onPress} activeOpacity={0.9}>
+    <TouchableOpacity style={styles.teamCard} onPress={onPress} activeOpacity={0.86}>
+      <View style={styles.teamIcon}>
+        <Ionicons name="shield-outline" size={21} color="#F28B25" />
+      </View>
       <View style={{ flex: 1 }}>
         <Text style={styles.teamTitle}>{title}</Text>
         <Text style={styles.teamSub}>{subtitle}</Text>
       </View>
-      <Text style={styles.chev}>›</Text>
+      <Ionicons name="chevron-forward" size={19} color="#7187A4" />
     </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#001738", paddingTop: 40, paddingHorizontal: 16 },
-
-  headerRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  backBtn: { paddingVertical: 8, paddingRight: 12 },
-  backText: { color: "#f28b25", fontSize: 14, fontWeight: "700" },
-  title: { color: "#ffffff", fontSize: 16, fontWeight: "800" },
-  breadcrumb: { color: "#9fb0c8", fontSize: 12, marginTop: 2 },
-
-  sectionTitle: { color: "#ffffff", fontSize: 14, fontWeight: "800", marginTop: 8, marginBottom: 10 },
-
-  bigCard: {
-    backgroundColor: "#022449",
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#355a8a",
-    marginBottom: 12,
-  },
-  bigCardTop: { flexDirection: "row", alignItems: "center", gap: 10 },
-  bigEmoji: { fontSize: 22 },
-  bigTitle: { color: "#ffffff", fontSize: 18, fontWeight: "900" },
-  bigSub: { color: "#c3d0ea", marginTop: 2, fontSize: 12 },
-  bigCardBottom: { marginTop: 10 },
-  hint: { color: "#9fb0c8", fontSize: 12 },
-
-  chipsRow: { flexDirection: "row", gap: 10, marginBottom: 12 },
-chip: {
-  flex: 1,
-  backgroundColor: "rgba(8, 35, 80, 0.55)",
-  borderRadius: 18,
-  borderWidth: 1,
-  borderColor: "#355a8a",
-  paddingVertical: 18,     // vorher 10
-  alignItems: "center",
-  justifyContent: "center",
-  minHeight: 120,          // neu: macht die Fläche groß
-},
-
-  chipActive: { backgroundColor: "#f28b25", borderColor: "#f28b25" },
-  chipText: { color: "#ffffff", fontSize: 13, fontWeight: "800" },
-  chipTextActive: { color: "#001738" },
-
-  card: {
-    backgroundColor: "#022449",
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#355a8a",
-  },
-  cardTitle: { color: "#ffffff", fontSize: 14, fontWeight: "800", marginBottom: 6 },
-  cardSub: { color: "#c3d0ea", fontSize: 12, lineHeight: 18 },
-
-  teamCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#022449",
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#355a8a",
-    marginBottom: 10,
-  },
-  teamTitle: { color: "#ffffff", fontSize: 16, fontWeight: "900" },
-  teamSub: { color: "#c3d0ea", marginTop: 4, fontSize: 12 },
-
-  chev: { color: "#f28b25", fontSize: 22, fontWeight: "900" },
-
-  linkBtn: { paddingVertical: 12 },
-  linkText: { color: "#f28b25", fontSize: 13, fontWeight: "700" },
+  container: { flex: 1, backgroundColor: "#00152F", paddingTop: Platform.OS === "web" ? 26 : 44 },
+  headerRow: { flexDirection: "row", alignItems: "center", paddingHorizontal: 16, paddingBottom: 14 },
+  headerIconBtn: { width: 40, height: 40, borderRadius: 13, alignItems: "center", justifyContent: "center", backgroundColor: "#082A52", borderWidth: 1, borderColor: "#173F69" },
+  headerIconSpacer: { width: 40, height: 40 },
+  headerCenter: { flex: 1, alignItems: "center" },
+  title: { color: "#FFFFFF", fontSize: 19, fontWeight: "900" },
+  breadcrumb: { color: "#7187A4", fontSize: 10.5, marginTop: 2, fontWeight: "700" },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 24 },
+  eyebrow: { color: "#F28B25", fontSize: 9, fontWeight: "900", letterSpacing: 1.3, marginBottom: 5 },
+  sectionHeading: { color: "#FFFFFF", fontSize: 22, fontWeight: "900", letterSpacing: -0.4 },
+  sectionIntro: { color: "#8398B2", fontSize: 11.5, lineHeight: 17, marginTop: 5, marginBottom: 17 },
+  bigCard: { minHeight: 112, flexDirection: "row", alignItems: "center", gap: 12, backgroundColor: "#062447", borderRadius: 20, padding: 14, borderWidth: 1, borderColor: "#173F69", marginBottom: 11 },
+  cardIcon: { width: 48, height: 48, borderRadius: 16, backgroundColor: "rgba(242,139,37,0.10)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(242,139,37,0.23)" },
+  bigTitle: { color: "#FFFFFF", fontSize: 17, fontWeight: "900" },
+  bigSub: { color: "#A6B6C8", marginTop: 3, fontSize: 11.5, fontWeight: "700" },
+  hint: { color: "#637B98", fontSize: 9.5, marginTop: 7, fontWeight: "700" },
+  chevWrap: { width: 34, height: 34, borderRadius: 11, backgroundColor: "#082A52", alignItems: "center", justifyContent: "center" },
+  seasonGrid: { flexDirection: "row", gap: 10 },
+  seasonCard: { flex: 1, minHeight: 158, backgroundColor: "#062447", borderRadius: 20, padding: 15, borderWidth: 1, borderColor: "#173F69" },
+  seasonIcon: { width: 45, height: 45, borderRadius: 15, backgroundColor: "rgba(242,139,37,0.10)", alignItems: "center", justifyContent: "center", marginBottom: 15 },
+  seasonTitle: { color: "#FFFFFF", fontSize: 16, fontWeight: "900" },
+  seasonSub: { color: "#8398B2", fontSize: 10.5, lineHeight: 15, marginTop: 4 },
+  teamCard: { minHeight: 74, flexDirection: "row", alignItems: "center", gap: 11, backgroundColor: "#062447", borderRadius: 18, padding: 12, borderWidth: 1, borderColor: "#173F69", marginBottom: 10 },
+  teamIcon: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#082A52", alignItems: "center", justifyContent: "center" },
+  teamTitle: { color: "#FFFFFF", fontSize: 15, fontWeight: "900" },
+  teamSub: { color: "#8398B2", marginTop: 3, fontSize: 10.5, fontWeight: "700" },
 });
