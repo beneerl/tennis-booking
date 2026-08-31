@@ -15,6 +15,7 @@ import {
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabaseClient";
+import { getCurrentUserProfile, normalizeUserStatus } from "../authProfile";
 
 const SLOT_DURATION_HOURS = 0.5;
 const SLOT_ROW_HEIGHT = 74; // geschätzte Höhe pro Zeitzeile inkl. Abstand
@@ -93,10 +94,11 @@ function isNetworkFetchError(err) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export default function BookingScreen({ route, navigation }) {
-  const params = route?.params || {};
-  const userName = params.userName || "Gast";
-  const isAdmin = !!params.isAdmin;
+export default function BookingScreen({ navigation }) {
+  // WICHTIG: Identitaet und Admin-Rolle kommen nie aus route.params/URL.
+  const [userName, setUserName] = useState("");
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [authChecked, setAuthChecked] = useState(false);
 
   const [date, setDate] = useState(new Date());
   const [maxHoursPerDay, setMaxHoursPerDay] = useState(2);
@@ -208,43 +210,99 @@ useEffect(() => {
   }
 }, [currentDateKey, isTodaySelected]);
 useEffect(() => {
+  let active = true;
   let sub = null;
 
-  const boot = async () => {
+  const goToLogin = async () => {
     try {
-      // 1) Session lesen
-      const { data: s1 } = await supabase.auth.getSession();
+      await AsyncStorage.removeItem("user_login");
+    } catch {}
 
-      // 2) iOS Home-Screen: manchmal erst nach refreshSession da
-      if (!s1?.session) {
-        await supabase.auth.refreshSession();
+    if (!active) return;
+    setSessionReady(false);
+    setMyUserId(null);
+    setUserName("");
+    setIsAdmin(false);
+    setAuthChecked(true);
+    navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+  };
+
+  const boot = async (attempt = 0) => {
+    try {
+      const { session, profile } = await getCurrentUserProfile();
+      if (!active) return;
+
+      if (!session?.user?.id || !profile) {
+        await goToLogin();
+        return;
       }
 
-      // 3) nochmal prüfen
-      const { data: s2 } = await supabase.auth.getSession();
-      setSessionReady(!!s2?.session?.user?.id);
-      setMyUserId(s2?.session?.user?.id || null);
+      const status = normalizeUserStatus(profile.status);
+      const admin = !!profile.is_admin;
 
-      // 4) bei Änderungen updaten (Login/Logout/Refresh)
-      const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-        setSessionReady(!!session?.user?.id);
-        setMyUserId(session?.user?.id || null);
-      });
-      sub = data?.subscription;
+      if (status === "blocked" || (status !== "approved" && !admin)) {
+        try {
+          await supabase.auth.signOut();
+        } catch {}
+        await goToLogin();
+        return;
+      }
+
+      setUserName(profile.name || session.user.email || "Spieler");
+      setIsAdmin(admin);
+      setMyUserId(session.user.id);
+      setSessionReady(true);
+      setAuthChecked(true);
+
+      // Der lokale Komfort-Cache darf die Rolle spiegeln, ist aber nie Berechtigungsquelle.
+      try {
+        await AsyncStorage.setItem(
+          "user_login",
+          JSON.stringify({
+            email: profile.email || session.user.email || "",
+            name: profile.name || "",
+            is_admin: admin,
+          })
+        );
+      } catch {}
     } catch (e) {
-      console.log("boot session error:", e);
-      setSessionReady(false);
+      console.log("boot session/profile error:", e?.message || e);
+
+      // Bei einem kurzen iOS-/Netzwerk-Hänger nicht sofort ausloggen.
+      if (isNetworkFetchError(e) && attempt < 2) {
+        setTimeout(() => {
+          if (active) boot(attempt + 1);
+        }, 700 * (attempt + 1));
+        return;
+      }
+
+      await goToLogin();
     }
   };
 
   boot();
 
+  const { data } = supabase.auth.onAuthStateChange((event, session) => {
+    if (!active) return;
+    setSessionReady(!!session?.user?.id);
+    setMyUserId(session?.user?.id || null);
+
+    if (event === "SIGNED_OUT" || !session?.user?.id) {
+      // Nicht im Callback auf weitere Supabase-Abfragen warten.
+      setTimeout(() => {
+        if (active) goToLogin();
+      }, 0);
+    }
+  });
+  sub = data?.subscription;
+
   return () => {
+    active = false;
     try {
       sub?.unsubscribe?.();
     } catch {}
   };
-}, []);
+}, [navigation]);
 
 useEffect(() => {
   const interval = setInterval(() => {
@@ -385,7 +443,7 @@ useEffect(() => {
 
 // ✅ Web/PWA Resume-Fix (iOS Home-Screen + Android Web)
 useEffect(() => {
-  if (Platform.OS !== "web") return;
+  if (Platform.OS !== "web" || !sessionReady) return;
 
   const onResume = async () => {
     // kleiner Delay nach Unlock/Tab-Wechsel
@@ -413,7 +471,7 @@ useEffect(() => {
     window.removeEventListener("online", onResume);
     document.removeEventListener("visibilitychange", onVisibility);
   };
-}, [currentDateKey]);
+}, [currentDateKey, sessionReady]);
 
   // -------- weekly_blocks laden --------
   const loadWeeklyRules = async () => {
@@ -499,9 +557,34 @@ const loadCourtClosures = async () => {
   }
 };
 
+const loadAllUsers = async () => {
+  setUsersLoading(true);
+  try {
+    const { data, error } = await supabase
+      .from("users")
+      .select("id, name, status")
+      .eq("status", "approved")
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.log("users picker load error:", error.message);
+      setAllUsers([]);
+      return;
+    }
+
+    setAllUsers((data || []).filter((u) => u?.name));
+  } catch (e) {
+    console.log("users picker load exception:", e?.message || e);
+    setAllUsers([]);
+  } finally {
+    setUsersLoading(false);
+  }
+};
+
   useEffect(() => {
+    if (!sessionReady) return;
     loadWeeklyRules();
-  }, []);
+  }, [sessionReady]);
 
   useEffect(() => {
   // Nur wenn "heute" ausgewählt ist
@@ -627,19 +710,19 @@ const deleteBookingFromSupabase = async (courtIndex, time) => {
 
 const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName) => {
   try {
-    // ✅ Session holen -> user_id
+    // Session holen -> user_id
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
     if (sessionError) {
       console.log("getSession error:", sessionError.message);
-      Alert.alert("Login-Fehler", "Session konnte nicht gelesen werden.");
-      return;
+      showMessage("Login-Fehler", "Session konnte nicht gelesen werden.");
+      return false;
     }
 
     const userId = sessionData?.session?.user?.id || null;
 
     if (!userId) {
-      Alert.alert("Nicht eingeloggt", "Bitte neu einloggen, um zu buchen.");
-      return;
+      showMessage("Nicht eingeloggt", "Bitte neu einloggen, um zu buchen.");
+      return false;
     }
 
     const rows = times.map((t) => ({
@@ -648,18 +731,22 @@ const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName)
       date_key: currentDateKey,
       user_name: userName,
       player2: coPlayerName || null,
-      user_id: userId, // ✅ NEU (WICHTIG für RLS)
+      user_id: userId,
     }));
 
     const { error } = await supabase.from("bookings123").insert(rows);
 
     if (error) {
       console.log("Supabase insert error:", error.message);
-      Alert.alert("DB-Fehler (Insert)", error.message);
+      showMessage("Buchung fehlgeschlagen", error.message);
+      return false;
     }
+
+    return true;
   } catch (e) {
     console.log("Supabase insert exception:", e);
-    Alert.alert("DB-Fehler (Exception)", String(e));
+    showMessage("Buchung fehlgeschlagen", String(e));
+    return false;
   }
 };
 
@@ -831,7 +918,17 @@ if (past && !isAdmin) {
     }));
 
     setBookings((prev) => [...prev, ...newBookings]);
-    await insertMultipleBookingsToSupabase(courtIndex, timesToBook, coName);
+    const saved = await insertMultipleBookingsToSupabase(
+      courtIndex,
+      timesToBook,
+      coName
+    );
+
+    if (!saved) {
+      const failedIds = new Set(newBookings.map((b) => b.id));
+      setBookings((prev) => prev.filter((b) => !failedIds.has(b.id)));
+      await loadBookingsForDate(currentDateKey);
+    }
 
     setBookingModalVisible(false);
     setPendingSlot(null);
@@ -851,6 +948,16 @@ if (past && !isAdmin) {
   const getCourtName = (courtIndex) =>
     COURTS[courtIndex] || `Platz ${courtIndex + 1}`;
 
+  if (!authChecked || !sessionReady || !userName) {
+    return (
+      <View style={[styles.container, { alignItems: "center", justifyContent: "center" }]}>
+        <StatusBar barStyle="light-content" />
+        <ActivityIndicator color="#ffffff" />
+        <Text style={{ color: "#c3d0ea", marginTop: 10 }}>Anmeldung wird geprüft …</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
 
@@ -864,10 +971,7 @@ if (past && !isAdmin) {
       <TouchableOpacity
         style={styles.adminBtn}
         onPress={() =>
-          navigation.navigate("AdminSettings", {
-            userName,
-            isAdmin,
-          })
+          navigation.navigate("AdminSettings")
         }
       >
         <Text style={styles.adminBtnText}>Admin</Text>
@@ -878,10 +982,7 @@ if (past && !isAdmin) {
 <TouchableOpacity
   style={styles.teamsBtn}
   onPress={() =>
-    navigation.navigate("Teams", {
-      userName,
-      isAdmin,
-    })
+    navigation.navigate("Teams")
   }
 >
   <Text style={styles.teamsIcon}>🎾</Text>
@@ -890,7 +991,7 @@ if (past && !isAdmin) {
 {/* ✅ Neuer Reiter: LK */}
 <TouchableOpacity
   style={styles.lkBtn}
-  onPress={() => navigation.navigate("LK", { userName, isAdmin })}
+  onPress={() => navigation.navigate("LK")}
 
 >
   <Text style={styles.lkIcon}>📈</Text>

@@ -8,16 +8,86 @@ import {
   Alert,
   ScrollView,
   StatusBar,
+  ActivityIndicator,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabaseClient";
+import { getCurrentUserProfile, normalizeUserStatus } from "../authProfile";
 
 const COURTS = ["P1", "P2", "P3"];
 const WEEKDAYS = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 
-export default function AdminSettingsScreen({ route, navigation }) {
-  const { userName, isAdmin } = route.params || {};
+export default function AdminSettingsScreen({ navigation }) {
+  const [access, setAccess] = useState({
+    checking: true,
+    allowed: false,
+    userName: "",
+  });
 
+  useEffect(() => {
+    let active = true;
+
+    const verify = async () => {
+      try {
+        const { session, profile } = await getCurrentUserProfile();
+        if (!active) return;
+
+        const status = normalizeUserStatus(profile?.status);
+        const allowed =
+          !!session?.user?.id &&
+          !!profile?.is_admin &&
+          status !== "blocked";
+
+        setAccess({
+          checking: false,
+          allowed,
+          userName: profile?.name || "",
+        });
+      } catch (e) {
+        console.log("Admin access check error:", e?.message || e);
+        if (active) {
+          setAccess({ checking: false, allowed: false, userName: "" });
+        }
+      }
+    };
+
+    verify();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (access.checking) {
+    return (
+      <View style={[styles.container, { alignItems: "center", justifyContent: "center" }]}>
+        <StatusBar barStyle="light-content" />
+        <ActivityIndicator color="#ffffff" />
+        <Text style={{ color: "#c3d0ea", marginTop: 10 }}>Admin-Zugriff wird geprüft …</Text>
+      </View>
+    );
+  }
+
+  if (!access.allowed) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <Text style={styles.forbiddenText}>
+          Kein Admin-Zugriff. Bitte als Admin einloggen.
+        </Text>
+        <TouchableOpacity
+          style={styles.backBtn}
+          onPress={() => navigation.goBack()}
+        >
+          <Text style={styles.backBtnText}>Zurück</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  return <AdminSettingsContent navigation={navigation} userName={access.userName} />;
+}
+
+function AdminSettingsContent({ userName, navigation }) {
   const [activeTab, setActiveTab] = useState("blocks"); // "blocks" oder "users"
 
   // Sperrzeiten-Formular
@@ -49,22 +119,6 @@ const [exReason, setExReason] = useState("");
 const [exceptions, setExceptions] = useState([]);
 const [loadingExceptions, setLoadingExceptions] = useState(false);
 
-  if (!isAdmin) {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" />
-        <Text style={styles.forbiddenText}>
-          Kein Admin-Zugriff. Bitte als Admin einloggen.
-        </Text>
-        <TouchableOpacity
-          style={styles.backBtn}
-          onPress={() => navigation.goBack()}
-        >
-          <Text style={styles.backBtnText}>Zurück</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
 
   // ---- Max-Stunden laden/speichern (AsyncStorage) ----
   const loadMaxHours = async () => {
@@ -173,7 +227,7 @@ const loadExceptionsForDate = async (dateKey) => {
     try {
       const { data, error } = await supabase
         .from("users")
-        .select("*")
+        .select("id, name, email, status, is_admin, created_at")
         .order("created_at", { ascending: true });
 
       if (error) {

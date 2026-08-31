@@ -16,6 +16,7 @@ import {
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useNavigation } from "@react-navigation/native";
 import { supabase } from "../supabaseClient";
+import { getCurrentUserProfile, normalizeUserStatus } from "../authProfile";
 
 
 const STORAGE_PROFILE = "lk_profile_v1";
@@ -122,9 +123,9 @@ const calcImprovementDoubleForOneWinner = ({
   return base * 0.5;
 };
 
-export default function LKScreen({ route }) {
+export default function LKScreen() {
   const navigation = useNavigation();
-  const userName = route?.params?.userName || "Gast";
+  const [userName, setUserName] = useState("");
 
   const [loading, setLoading] = useState(true);
 
@@ -252,15 +253,36 @@ export default function LKScreen({ route }) {
         if (Array.isArray(h)) setHistory(h);
       }
 
-      // ✅ userId holen (für eindeutigen Upsert)
+      // Identitaet und Anzeigename immer aus der echten Session/DB ableiten.
       try {
-const { data: sessionData } = await supabase.auth.getSession();
-setUserId(sessionData?.session?.user?.id || null);
+        const { session, profile } = await getCurrentUserProfile();
+        const status = normalizeUserStatus(profile?.status);
+        const admin = !!profile?.is_admin;
 
-      } catch {
+        if (
+          !session?.user?.id ||
+          !profile ||
+          status === "blocked" ||
+          (status !== "approved" && !admin)
+        ) {
+          setUserId(null);
+          setUserName("");
+          navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+          return;
+        }
+
+        setUserId(session.user.id);
+        setUserName(profile.name || session.user.email || "Spieler");
+      } catch (e) {
+        console.log("LK auth/profile load error:", e?.message || e);
         setUserId(null);
+        setUserName("");
+        navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+        return;
       }
-    } catch {}
+    } catch (e) {
+      console.log("LK load error:", e?.message || e);
+    }
     setLoading(false);
   };
 
@@ -286,11 +308,17 @@ setUserId(sessionData?.session?.user?.id || null);
   }, [loading]);
   
 useEffect(() => {
-  const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+  const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
     setUserId(session?.user?.id || null);
+    if (event === "SIGNED_OUT" || !session?.user?.id) {
+      setUserName("");
+      setTimeout(() => {
+        navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+      }, 0);
+    }
   });
   return () => sub?.subscription?.unsubscribe?.();
-}, []);
+}, [navigation]);
 
   // ✅ Opt-in geändert => Profil einmal hochschreiben (mit aktueller LK aus Textfeld)
   useEffect(() => {

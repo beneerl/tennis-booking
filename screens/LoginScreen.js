@@ -59,29 +59,21 @@ export default function LoginScreen({ navigation }) {
   useEffect(() => {
     const bootstrap = async () => {
       try {
-        // 1) Supabase Session prüfen
+        // 1) Supabase-Session ist die einzige Login-Wahrheit.
+        // user_login ist nur Komfort-Cache und darf einen gueltigen Login nicht blockieren.
         const { data: sessionData } = await supabase.auth.getSession();
         const sessionEmail = sessionData?.session?.user?.email
           ? String(sessionData.session.user.email).toLowerCase()
           : null;
 
-// 2) AsyncStorage ist der "Schalter" für Auto-Login
-const json = await AsyncStorage.getItem("user_login");
-const stored = json ? JSON.parse(json) : null;
-const storedEmail = stored?.email ? String(stored.email).toLowerCase() : null;
+        if (!sessionEmail) {
+          try {
+            await AsyncStorage.removeItem("user_login");
+          } catch {}
+          return;
+        }
 
-// Wenn kein user_login gespeichert ist -> KEIN Auto-Login (wichtig für Logout auf Web)
-if (!storedEmail) return;
-
-// Optional: Wenn Session fehlt, bleib im Login
-// (Wenn du willst, dass Auto-Login nur mit Session geht, lass diese 3 Zeilen drin)
-if (!sessionEmail) {
-  await AsyncStorage.removeItem("user_login");
-  return;
-}
-
-// Wir prüfen den User anhand der gespeicherten Email (nicht anhand sessionEmail)
-const emailToCheck = storedEmail;
+        const emailToCheck = sessionEmail;
 
 
         // 3) User in DB laden + Status checken
@@ -119,10 +111,7 @@ const emailToCheck = storedEmail;
           })
         );
 
-        navigation.replace("Booking", {
-          userName: u.name,
-          isAdmin: isAdmin,
-        });
+        navigation.replace("Booking");
       } catch (e) {
         console.log("Auto-login bootstrap error:", e?.message || e);
       }
@@ -211,10 +200,7 @@ const emailToCheck = storedEmail;
           );
 
           showMessage("Login erfolgreich", "Willkommen, " + u.name + "!");
-          navigation.replace("Booking", {
-            userName: u.name,
-            isAdmin: isAdmin,
-          });
+          navigation.replace("Booking");
           setLoading(false);
         };
 

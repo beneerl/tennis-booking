@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabaseClient";
+import { getCurrentUserProfile, normalizeUserStatus } from "../authProfile";
 
 export default function ProfileScreen({ navigation }) {
   const [user, setUser] = useState(null);
@@ -18,29 +19,50 @@ export default function ProfileScreen({ navigation }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let active = true;
+
     const load = async () => {
       try {
-        const json = await AsyncStorage.getItem("user_login");
-        if (!json) {
-          navigation.replace("Login");
+        const { session, profile } = await getCurrentUserProfile();
+
+        if (!session?.user?.id || !profile) {
+          navigation.reset({ index: 0, routes: [{ name: "Login" }] });
           return;
         }
-        const u = JSON.parse(json);
+
+        const status = normalizeUserStatus(profile.status);
+        const admin = !!profile.is_admin;
+        if (status === "blocked" || (status !== "approved" && !admin)) {
+          try {
+            await supabase.auth.signOut();
+          } catch {}
+          try {
+            await AsyncStorage.removeItem("user_login");
+          } catch {}
+          navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+          return;
+        }
+
+        if (!active) return;
+        const u = {
+          id: profile.id,
+          auth_id: profile.auth_id,
+          email: profile.email || session.user.email || "",
+          name: profile.name || session.user.email || "Spieler",
+          is_admin: admin,
+        };
         setUser(u);
 
-        // PIN laden
-const { data: userRow, error: userErr } = await supabase
-  .from("users")
-  .select("pin")
-  .eq("email", u.email)
-  .order("created_at", { ascending: false })
-  .limit(1)
-  .maybeSingle();
-
+        // Legacy-PIN nur aus dem eigenen Profil laden.
+        const { data: userRow, error: userErr } = await supabase
+          .from("users")
+          .select("pin")
+          .eq("id", profile.id)
+          .maybeSingle();
 
         if (userErr) {
           console.log("Supabase user pin error:", userErr.message);
-        } else {
+        } else if (active) {
           setPin(userRow?.pin || "");
         }
 
@@ -59,18 +81,21 @@ const { data: userRow, error: userErr } = await supabase
 
         if (bookErr) {
           console.log("Supabase bookings count error:", bookErr.message);
-        } else {
-          setBookingCountYear(bookings.length);
+        } else if (active) {
+          setBookingCountYear((bookings || []).length);
         }
       } catch (e) {
-        console.log("Profile load exception:", e);
+        console.log("Profile load exception:", e?.message || e);
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     };
 
     load();
-  }, []);
+    return () => {
+      active = false;
+    };
+  }, [navigation]);
 
 const handleLogout = async () => {
   try {
