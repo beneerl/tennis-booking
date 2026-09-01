@@ -8,8 +8,10 @@ import {
   ScrollView,
   ActivityIndicator,
   RefreshControl,
+  StatusBar,
 } from "react-native";
 import { supabase } from "../supabaseClient";
+import { Ionicons } from "@expo/vector-icons";
 
 // ✅ Exakter Clubname wie in nuLiga/PDF (wichtig für Filter + Heim/Auswärts)
 // ✅ Clubname je Team (wichtig für TEG-Tab + Heim/Auswärts)
@@ -267,90 +269,145 @@ const ourMatchesRaw = allMatches
   if (loading) {
     return (
       <View style={styles.container}>
-        <View style={styles.headerRow}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-            <Text style={styles.backText}>{"< Zurück"}</Text>
+        <StatusBar barStyle="light-content" />
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.85}>
+            <Ionicons name="chevron-back" size={20} color="#F28B25" />
           </TouchableOpacity>
-          <Text style={styles.title}>{teamTitle}</Text>
-          <View style={{ width: 70 }} />
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerKicker}>TEAM</Text>
+            <Text style={styles.headerTitle} numberOfLines={1}>{teamTitle}</Text>
+          </View>
+          <View style={styles.refreshBtn}>
+            <Ionicons name="sync-outline" size={18} color="#8198B4" />
+          </View>
         </View>
-
         <View style={styles.center}>
-          <ActivityIndicator color="#ffffff" />
+          <ActivityIndicator color="#F28B25" />
           <Text style={styles.mutedText}>Lade Teamdaten…</Text>
         </View>
       </View>
     );
   }
 
+  const renderMatchCard = (m, mode = "teg") => {
+    const played = getMatchState(m) === "played";
+    const label = mode === "liga" ? "LIGA" : m.home ? "HEIM" : "AUSWÄRTS";
+    const icon = mode === "liga" ? "tennisball-outline" : m.home ? "home-outline" : "car-outline";
+
+    return (
+      <View
+        key={m.id || `${m.date}-${m.heim}-${m.gast}`}
+        style={[styles.matchCard, !played && styles.matchCardUpcoming, played && styles.matchCardPlayed]}
+      >
+        <View style={styles.matchTopRow}>
+          <View style={[styles.matchChip, mode === "liga" ? styles.matchChipNeutral : m.home ? styles.matchChipHome : styles.matchChipAway]}>
+            <Ionicons name={icon} size={11} color={mode === "liga" ? "#91A7C0" : m.home ? "#61D6B1" : "#F2A054"} />
+            <Text style={styles.matchChipText}>{label}</Text>
+          </View>
+          <Text style={styles.matchMetaRight}>
+            {formatDateDE(m.date)}{m.time ? ` · ${m.time}` : ""}
+          </Text>
+        </View>
+
+        <View style={styles.matchTeamsWrap}>
+          <View style={styles.clubLine}>
+            <View style={[styles.clubDot, normalizeClub(m.heim) === ourNorm && styles.clubDotOur]} />
+            <Text style={[styles.teamLine, normalizeClub(m.heim) === ourNorm && styles.teamLineOur]} numberOfLines={1}>{m.heim || "—"}</Text>
+          </View>
+          <View style={styles.clubLine}>
+            <View style={[styles.clubDot, normalizeClub(m.gast) === ourNorm && styles.clubDotOur]} />
+            <Text style={[styles.teamLine, normalizeClub(m.gast) === ourNorm && styles.teamLineOur]} numberOfLines={1}>{m.gast || "—"}</Text>
+          </View>
+
+          {!!m.erg && (
+            <View style={styles.scorePill}>
+              <Text style={styles.scoreText}>{m.erg}</Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.venueRow}>
+          <Ionicons name="location-outline" size={12} color="#607B98" />
+          <Text style={styles.matchVenue} numberOfLines={1}>{m.venue || "—"}</Text>
+        </View>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
-          <Text style={styles.backText}>{"< Zurück"}</Text>
+      <StatusBar barStyle="light-content" />
+
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.85}>
+          <Ionicons name="chevron-back" size={20} color="#F28B25" />
         </TouchableOpacity>
 
-        <Text style={styles.title} numberOfLines={1}>
-          {payload?.team || teamTitle}
-        </Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerKicker}>TENNIS TACHERTING · TEAM</Text>
+          <Text style={styles.headerTitle} numberOfLines={1}>{payload?.team || teamTitle}</Text>
+        </View>
 
-        <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn}>
-          <Text style={styles.refreshText}>↻</Text>
+        <TouchableOpacity onPress={onRefresh} style={styles.refreshBtn} activeOpacity={0.85}>
+          <Ionicons name="refresh-outline" size={18} color="#F28B25" />
         </TouchableOpacity>
       </View>
 
       <ScrollView
-        contentContainerStyle={{ paddingBottom: 24 }}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#fff" />
-        }
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#F28B25" />}
       >
-        {/* Hero */}
         <View style={styles.heroCard}>
           <View style={styles.heroTopRow}>
-            <Text style={styles.seasonText}>{payload?.season || "—"}</Text>
+            <View>
+              <Text style={styles.heroKicker}>SAISON</Text>
+              <Text style={styles.seasonText}>{payload?.season || "—"}</Text>
+            </View>
             <StatusBadge status={payload?.status} />
           </View>
 
           {__DEV__ && !!error && (
-            <Text style={styles.warningText}>
-              Hinweis: Live-Daten konnten nicht geladen werden ({error}). Demo-Daten werden angezeigt.
-            </Text>
+            <View style={styles.warningBox}>
+              <Ionicons name="warning-outline" size={15} color="#F0B26D" />
+              <Text style={styles.warningText}>Live-Daten konnten nicht geladen werden ({error}). Demo-Daten werden angezeigt.</Text>
+            </View>
           )}
 
           <View style={styles.nextMatchCard}>
-            <Text style={styles.sectionTitle}>Nächstes Spiel (TEG)</Text>
+            <View style={styles.nextMatchTitleRow}>
+              <View style={styles.nextMatchIcon}>
+                <Ionicons name="calendar-outline" size={17} color="#F28B25" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.nextMatchKicker}>NÄCHSTES SPIEL</Text>
+                <Text style={styles.nextMatchTitle}>TEG Begegnung</Text>
+              </View>
+            </View>
 
             {payload?.status === "PENDING" ? (
               <Text style={styles.mutedText}>Spielplan ist noch nicht veröffentlicht.</Text>
             ) : nextMatch ? (
               <>
-                <Text style={styles.bigLine}>
-                  {nextMatch.home ? "🏠 Heim" : "🚌 Auswärts"} · {formatDateDE(nextMatch.date)}
-                  {nextMatch.time ? ` · ${nextMatch.time}` : ""}
-                </Text>
-
-                <View style={styles.teamsRow}>
-                  <View style={{ flex: 1, paddingRight: 10 }}>
-                    <Text style={styles.teamLineHero} numberOfLines={1}>
-                      {nextMatch.heim || "—"}
-                    </Text>
-                    <Text style={styles.teamLineHero} numberOfLines={1}>
-                      {nextMatch.gast || "—"}
-                    </Text>
+                <View style={styles.nextMetaRow}>
+                  <View style={styles.nextMetaPill}>
+                    <Ionicons name={nextMatch.home ? "home-outline" : "car-outline"} size={12} color={nextMatch.home ? "#61D6B1" : "#F2A054"} />
+                    <Text style={styles.nextMetaText}>{nextMatch.home ? "Heim" : "Auswärts"}</Text>
                   </View>
-
-                  {!!nextMatch.erg && (
-                    <View style={styles.scoreBox}>
-                      <Text style={styles.scoreText}>{nextMatch.erg}</Text>
-                    </View>
-                  )}
+                  <Text style={styles.nextDate}>{formatDateDE(nextMatch.date)}{nextMatch.time ? ` · ${nextMatch.time}` : ""}</Text>
                 </View>
 
-                <Text style={styles.matchVenue} numberOfLines={2}>
-                  {nextMatch.venue || "—"}
-                </Text>
+                <View style={styles.heroTeams}>
+                  <Text style={[styles.heroTeamName, normalizeClub(nextMatch.heim) === ourNorm && styles.heroTeamOur]} numberOfLines={1}>{nextMatch.heim || "—"}</Text>
+                  <View style={styles.vsPill}><Text style={styles.vsText}>VS</Text></View>
+                  <Text style={[styles.heroTeamName, normalizeClub(nextMatch.gast) === ourNorm && styles.heroTeamOur]} numberOfLines={1}>{nextMatch.gast || "—"}</Text>
+                </View>
+
+                <View style={styles.heroVenueRow}>
+                  <Ionicons name="location-outline" size={13} color="#607B98" />
+                  <Text style={styles.heroVenue} numberOfLines={1}>{nextMatch.venue || "—"}</Text>
+                </View>
               </>
             ) : (
               <Text style={styles.mutedText}>Aktuell kein nächstes TEG-Spiel gefunden.</Text>
@@ -358,159 +415,87 @@ const ourMatchesRaw = allMatches
           </View>
         </View>
 
-        {/* Tabs */}
         <View style={styles.tabsRow}>
           <TabButton label="TEG" active={tab === "teg"} onPress={() => setTab("teg")} />
           <TabButton label="Tabelle" active={tab === "table"} onPress={() => setTab("table")} />
           <TabButton label="Liga" active={tab === "liga"} onPress={() => setTab("liga")} />
         </View>
 
-        {/* ======= TEG TAB ======= */}
         {tab === "teg" && (
-          <View style={{ paddingHorizontal: 14, marginTop: 12 }}>
-            {tegList.length === 0 ? (
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>TEG Begegnungen</Text>
-                <Text style={styles.mutedText}>Keine Begegnungen für TeG Alzstadt gefunden.</Text>
+          <View style={styles.sectionWrap}>
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={styles.sectionKicker}>TEG ALZSTADT</Text>
+                <Text style={styles.sectionTitle}>Begegnungen</Text>
               </View>
-            ) : (
-              tegList.map((m) => (
-                <View
-                  key={m.id || `${m.date}-${m.heim}-${m.gast}`}
-                  style={[
-                    styles.matchCard,
-                    getMatchState(m) === "played"
-                      ? styles.matchCardPlayed
-                      : styles.matchCardUpcoming,
-                  ]}
-                >
-                  <View style={styles.matchTopRow}>
-                    <View style={[styles.chip, m.home ? styles.chipHome : styles.chipAway]}>
-                      <Text style={styles.chipText}>{m.home ? "HEIM" : "AUSWÄRTS"}</Text>
-                    </View>
-
-                    <Text style={styles.matchMetaRight}>
-                      {formatDateDE(m.date)}
-                      {m.time ? ` · ${m.time}` : ""}
-                    </Text>
-                  </View>
-
-                  <View style={styles.teamsRow}>
-                    <View style={{ flex: 1, paddingRight: 10 }}>
-                      <Text style={styles.teamLine} numberOfLines={1}>
-                        {m.heim || "—"}
-                      </Text>
-                      <Text style={styles.teamLine} numberOfLines={1}>
-                        {m.gast || "—"}
-                      </Text>
-                    </View>
-
-                    {!!m.erg && (
-                      <View style={styles.scoreBox}>
-                        <Text style={styles.scoreText}>{m.erg}</Text>
-                      </View>
-                    )}
-                  </View>
-
-                  <Text style={styles.matchVenue} numberOfLines={2}>
-                    {m.venue || "—"}
-                  </Text>
-                </View>
-              ))
-            )}
+              <View style={styles.countPill}><Text style={styles.countText}>{tegList.length}</Text></View>
+            </View>
+            {tegList.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Ionicons name="calendar-clear-outline" size={24} color="#4E6988" />
+                <Text style={styles.emptyTitle}>Keine Begegnungen</Text>
+                <Text style={styles.emptyText}>Für TeG Alzstadt wurden aktuell keine Spiele gefunden.</Text>
+              </View>
+            ) : tegList.map((m) => renderMatchCard(m, "teg"))}
           </View>
         )}
 
-        {/* ======= TABLE TAB ======= */}
         {tab === "table" && (
-          <View style={{ paddingHorizontal: 14, marginTop: 12 }}>
-            <View style={styles.card}>
-              <Text style={styles.sectionTitle}>Tabelle</Text>
+          <View style={styles.sectionWrap}>
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={styles.sectionKicker}>LIGA</Text>
+                <Text style={styles.sectionTitle}>Tabelle</Text>
+              </View>
+              <Ionicons name="list-outline" size={19} color="#7187A4" />
+            </View>
 
+            <View style={styles.tableCard}>
               {table.length === 0 ? (
-                <Text style={styles.mutedText}>Noch keine Tabelle verfügbar.</Text>
+                <View style={styles.emptyInner}>
+                  <Text style={styles.mutedText}>Noch keine Tabelle verfügbar.</Text>
+                </View>
               ) : (
                 <View style={styles.table}>
                   <View style={styles.tableHeader}>
-                    <Text style={[styles.th, { width: 40 }]}>#</Text>
+                    <Text style={[styles.th, { width: 34 }]}>#</Text>
                     <Text style={[styles.th, { flex: 1 }]}>Verein</Text>
-                    <Text style={[styles.th, { width: 60, textAlign: "right" }]}>Sp</Text>
-                    <Text style={[styles.th, { width: 70, textAlign: "right" }]}>Pkt</Text>
+                    <Text style={[styles.th, { width: 38, textAlign: "right" }]}>Sp</Text>
+                    <Text style={[styles.th, { width: 58, textAlign: "right" }]}>Pkt</Text>
                   </View>
 
-                  {table.map((row) => (
-                    <View key={`${row.rank}-${row.club}`} style={styles.tableRow}>
-                      <Text style={[styles.td, { width: 40 }]}>{row.rank}</Text>
-                      <Text style={[styles.td, { flex: 1 }]} numberOfLines={1}>
-                        {row.club}
-                      </Text>
-                      <Text style={[styles.td, { width: 60, textAlign: "right" }]}>
-                        {row.played ?? "—"}
-                      </Text>
-                      <Text style={[styles.td, { width: 70, textAlign: "right" }]}>
-                        {row.points ?? "—"}
-                      </Text>
-                    </View>
-                  ))}
+                  {table.map((row) => {
+                    const isOurRow = normalizeClub(row.club) === ourNorm;
+                    return (
+                      <View key={`${row.rank}-${row.club}`} style={[styles.tableRow, isOurRow && styles.tableRowOur]}>
+                        <Text style={[styles.rankText, isOurRow && styles.tableTextOur]}>{row.rank}</Text>
+                        <Text style={[styles.td, { flex: 1 }, isOurRow && styles.tableTextOur]} numberOfLines={1}>{row.club}</Text>
+                        <Text style={[styles.td, { width: 38, textAlign: "right" }, isOurRow && styles.tableTextOur]}>{row.played ?? "—"}</Text>
+                        <Text style={[styles.pointsText, isOurRow && styles.pointsTextOur]}>{row.points ?? "—"}</Text>
+                      </View>
+                    );
+                  })}
                 </View>
               )}
             </View>
           </View>
         )}
 
-        {/* ======= LIGA TAB ======= */}
         {tab === "liga" && (
-          <View style={{ paddingHorizontal: 14, marginTop: 12 }}>
-            {ligaList.length === 0 ? (
-              <View style={styles.card}>
-                <Text style={styles.sectionTitle}>Liga Begegnungen</Text>
-                <Text style={styles.mutedText}>Keine Liga-Begegnungen gefunden.</Text>
+          <View style={styles.sectionWrap}>
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={styles.sectionKicker}>GESAMTE LIGA</Text>
+                <Text style={styles.sectionTitle}>Spielplan</Text>
               </View>
-            ) : (
-              ligaList.map((m) => (
-                <View
-                  key={m.id || `${m.date}-${m.heim}-${m.gast}`}
-                  style={[
-                    styles.matchCard,
-                    getMatchState(m) === "played"
-                      ? styles.matchCardPlayed
-                      : styles.matchCardUpcoming,
-                  ]}
-                >
-                  <View style={styles.matchTopRow}>
-                    <View style={[styles.chip, styles.chipNeutral]}>
-                      <Text style={styles.chipText}>LIGA</Text>
-                    </View>
-
-                    <Text style={styles.matchMetaRight}>
-                      {formatDateDE(m.date)}
-                      {m.time ? ` · ${m.time}` : ""}
-                    </Text>
-                  </View>
-
-                  <View style={styles.teamsRow}>
-                    <View style={{ flex: 1, paddingRight: 10 }}>
-                      <Text style={styles.teamLine} numberOfLines={1}>
-                        {m.heim || "—"}
-                      </Text>
-                      <Text style={styles.teamLine} numberOfLines={1}>
-                        {m.gast || "—"}
-                      </Text>
-                    </View>
-
-                    {!!m.erg && (
-                      <View style={styles.scoreBox}>
-                        <Text style={styles.scoreText}>{m.erg}</Text>
-                      </View>
-                    )}
-                  </View>
-
-                  <Text style={styles.matchVenue} numberOfLines={2}>
-                    {m.venue || "—"}
-                  </Text>
-                </View>
-              ))
-            )}
+              <View style={styles.countPill}><Text style={styles.countText}>{ligaList.length}</Text></View>
+            </View>
+            {ligaList.length === 0 ? (
+              <View style={styles.emptyCard}>
+                <Ionicons name="tennisball-outline" size={24} color="#4E6988" />
+                <Text style={styles.emptyTitle}>Keine Liga-Begegnungen</Text>
+              </View>
+            ) : ligaList.map((m) => renderMatchCard(m, "liga"))}
           </View>
         )}
       </ScrollView>
@@ -520,180 +505,90 @@ const ourMatchesRaw = allMatches
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#001738", paddingTop: 40 },
-
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 14,
-    paddingBottom: 10,
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  backBtn: { paddingVertical: 8, paddingRight: 12 },
-  backText: { color: "#f28b25", fontSize: 14, fontWeight: "700" },
-  title: { color: "#ffffff", fontSize: 18, fontWeight: "800", flex: 1, textAlign: "center" },
-  refreshBtn: {
-    width: 44,
-    height: 34,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#355a8a",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  refreshText: { color: "#ffffff", fontSize: 18 },
-
-  center: { flex: 1, alignItems: "center", justifyContent: "center" },
-  mutedText: { color: "#9fb0c8", marginTop: 8, textAlign: "center" },
-
-  heroCard: {
-    marginHorizontal: 14,
-    backgroundColor: "#022449",
-    borderRadius: 20,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#355a8a",
-  },
+  header: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 14, paddingBottom: 13, borderBottomWidth: 1, borderBottomColor: "#123356" },
+  backBtn: { width: 41, height: 41, borderRadius: 13, backgroundColor: "#08264A", borderWidth: 1, borderColor: "#173F66", alignItems: "center", justifyContent: "center" },
+  headerKicker: { color: "#7187A4", fontSize: 8.2, fontWeight: "900", letterSpacing: 0.7 },
+  headerTitle: { color: "#FFFFFF", fontSize: 18.5, fontWeight: "900", marginTop: 1 },
+  refreshBtn: { width: 41, height: 41, borderRadius: 13, backgroundColor: "#302719", borderWidth: 1, borderColor: "#654725", alignItems: "center", justifyContent: "center" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
+  mutedText: { color: "#7E95B0", fontSize: 9.5, lineHeight: 14 },
+  scrollContent: { paddingBottom: 28 },
+  heroCard: { marginHorizontal: 14, marginTop: 14, backgroundColor: "#051E3B", borderRadius: 20, padding: 14, borderWidth: 1, borderColor: "#173F66" },
   heroTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  seasonText: { color: "#ffffff", fontSize: 16, fontWeight: "900" },
-
-  warningText: {
-    marginTop: 10,
-    color: "#ffd18a",
-    fontSize: 12,
-    lineHeight: 16,
-  },
-
-  badge: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999 },
-  badgeText: { fontSize: 11, fontWeight: "900" },
-  badgeNeutral: { backgroundColor: "rgba(195, 208, 234, 0.12)" },
-  badgeActive: { backgroundColor: "rgba(46, 204, 113, 0.18)" },
-  badgePending: { backgroundColor: "rgba(243, 156, 18, 0.18)" },
-  badgeFinished: { backgroundColor: "rgba(155, 89, 182, 0.18)" },
-
-  badgeTextNeutral: { color: "#c3d0ea" },
-  badgeTextActive: { color: "#bff2d3" },
-  badgeTextPending: { color: "#ffd18a" },
-  badgeTextFinished: { color: "#e3c7ff" },
-
-  nextMatchCard: {
-    marginTop: 12,
-    backgroundColor: "rgba(8, 35, 80, 0.9)",
-    borderRadius: 16,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#183b63",
-  },
-  sectionTitle: { color: "#ffffff", fontSize: 14, fontWeight: "900", marginBottom: 8 },
-  bigLine: { color: "#c3d0ea", fontSize: 13, marginBottom: 6 },
-
-  tabsRow: {
-    marginTop: 12,
-    marginHorizontal: 14,
-    flexDirection: "row",
-    gap: 8,
-  },
-  tabBtn: {
-    flex: 1,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#355a8a",
-    paddingVertical: 10,
-    alignItems: "center",
-    backgroundColor: "rgba(8, 35, 80, 0.55)",
-  },
-  tabBtnActive: { backgroundColor: "#f28b25", borderColor: "#f28b25" },
-  tabText: { color: "#ffffff", fontSize: 13, fontWeight: "900" },
+  heroKicker: { color: "#7187A4", fontSize: 7.8, fontWeight: "900", letterSpacing: 0.8 },
+  seasonText: { color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 },
+  warningBox: { marginTop: 10, borderRadius: 12, backgroundColor: "#2D261B", borderWidth: 1, borderColor: "#604626", padding: 9, flexDirection: "row", gap: 7, alignItems: "flex-start" },
+  warningText: { color: "#C7A477", fontSize: 8.5, lineHeight: 12, flex: 1 },
+  badge: { paddingHorizontal: 9, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
+  badgeText: { fontSize: 7.5, fontWeight: "900", letterSpacing: 0.45 },
+  badgeNeutral: { backgroundColor: "#0B2947", borderColor: "#24496B" },
+  badgeActive: { backgroundColor: "#0A3443", borderColor: "#246D62" },
+  badgePending: { backgroundColor: "#302719", borderColor: "#654725" },
+  badgeFinished: { backgroundColor: "#251F35", borderColor: "#4F436E" },
+  badgeTextNeutral: { color: "#9CB0C5" },
+  badgeTextActive: { color: "#61D6B1" },
+  badgeTextPending: { color: "#F2A054" },
+  badgeTextFinished: { color: "#BBA9E8" },
+  nextMatchCard: { marginTop: 12, backgroundColor: "#03172E", borderRadius: 16, padding: 11, borderWidth: 1, borderColor: "#123858" },
+  nextMatchTitleRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  nextMatchIcon: { width: 34, height: 34, borderRadius: 11, backgroundColor: "#302719", borderWidth: 1, borderColor: "#654725", alignItems: "center", justifyContent: "center" },
+  nextMatchKicker: { color: "#6F87A4", fontSize: 7, fontWeight: "900", letterSpacing: 0.8 },
+  nextMatchTitle: { color: "#DCE7F2", fontSize: 11.5, fontWeight: "900", marginTop: 1 },
+  nextMetaRow: { marginTop: 11, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
+  nextMetaPill: { flexDirection: "row", alignItems: "center", gap: 4, minHeight: 26, borderRadius: 9, backgroundColor: "#082B3E", paddingHorizontal: 8 },
+  nextMetaText: { color: "#9DB2C6", fontSize: 8.5, fontWeight: "900" },
+  nextDate: { color: "#8399B3", fontSize: 8.8, fontWeight: "800" },
+  heroTeams: { marginTop: 11, borderRadius: 13, backgroundColor: "#061E38", padding: 10, gap: 5 },
+  heroTeamName: { color: "#B9C9D9", fontSize: 13.5, fontWeight: "900" },
+  heroTeamOur: { color: "#FFFFFF" },
+  vsPill: { alignSelf: "flex-start", minWidth: 25, height: 18, borderRadius: 6, backgroundColor: "#0B2947", alignItems: "center", justifyContent: "center" },
+  vsText: { color: "#617C99", fontSize: 6.5, fontWeight: "900" },
+  heroVenueRow: { marginTop: 9, flexDirection: "row", gap: 5, alignItems: "center" },
+  heroVenue: { color: "#6F87A4", fontSize: 8.8, flex: 1 },
+  tabsRow: { marginTop: 12, marginHorizontal: 14, flexDirection: "row", backgroundColor: "#041A34", borderRadius: 14, borderWidth: 1, borderColor: "#153A5D", padding: 4, gap: 4 },
+  tabBtn: { flex: 1, minHeight: 37, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  tabBtnActive: { backgroundColor: "#F28B25" },
+  tabText: { color: "#7188A4", fontSize: 9.5, fontWeight: "900" },
   tabTextActive: { color: "#001738" },
-
-  card: {
-    marginTop: 12,
-    backgroundColor: "#022449",
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#355a8a",
-  },
-
-  matchCard: {
-    marginTop: 12,
-    backgroundColor: "#022449",
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#355a8a",
-  },
-
-  matchCardUpcoming: {
-    borderColor: "#f28b25",
-    borderWidth: 2,
-  },
-
-  matchCardPlayed: {
-    borderColor: "rgba(255,255,255,0.18)",
-    opacity: 0.92,
-  },
-
-  matchTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-
-  matchMetaRight: {
-    color: "#c3d0ea",
-    fontSize: 12,
-    fontWeight: "800",
-  },
-
-  chip: { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, borderWidth: 1 },
-  chipHome: { borderColor: "#2ecc71" },
-  chipAway: { borderColor: "#e67e22" },
-  chipNeutral: { borderColor: "#355a8a" },
-  chipText: { color: "#ffffff", fontSize: 11, fontWeight: "900" },
-
-  teamsRow: {
-    marginTop: 10,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-
-  teamLine: {
-    color: "#ffffff",
-    fontSize: 14,
-    fontWeight: "900",
-  },
-  teamLineHero: {
-    color: "#ffffff",
-    fontSize: 18,
-    lineHeight: 22,
-    fontWeight: "900",
-  },
-
-  scoreBox: {
-    minWidth: 56,
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#f28b25",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  scoreText: {
-    color: "#f28b25",
-    fontSize: 14,
-    fontWeight: "900",
-  },
-
-  matchVenue: { marginTop: 6, color: "#9fb0c8", fontSize: 13 },
-
-  // Table
-  table: { marginTop: 8 },
-  tableHeader: {
-    flexDirection: "row",
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: "#183b63",
-  },
-  th: { color: "#9fb0c8", fontSize: 12, fontWeight: "900" },
-  tableRow: { flexDirection: "row", paddingVertical: 10 },
-  td: { color: "#ffffff", fontSize: 13, fontWeight: "800" },
+  sectionWrap: { paddingHorizontal: 14, marginTop: 16 },
+  sectionHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 },
+  sectionKicker: { color: "#7187A4", fontSize: 7.5, fontWeight: "900", letterSpacing: 0.8 },
+  sectionTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 },
+  countPill: { minWidth: 32, height: 29, borderRadius: 10, backgroundColor: "#08264A", borderWidth: 1, borderColor: "#173F66", alignItems: "center", justifyContent: "center" },
+  countText: { color: "#9FB1C7", fontSize: 9, fontWeight: "900" },
+  matchCard: { marginBottom: 8, backgroundColor: "#051E3B", borderRadius: 16, padding: 11, borderWidth: 1, borderColor: "#153A5D" },
+  matchCardUpcoming: { borderColor: "#694925" },
+  matchCardPlayed: { opacity: 0.9 },
+  matchTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
+  matchChip: { minHeight: 24, flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 7, borderRadius: 8, borderWidth: 1 },
+  matchChipHome: { backgroundColor: "#082C31", borderColor: "#23675D" },
+  matchChipAway: { backgroundColor: "#302719", borderColor: "#654725" },
+  matchChipNeutral: { backgroundColor: "#08264A", borderColor: "#173F66" },
+  matchChipText: { color: "#AFC0D1", fontSize: 7.3, fontWeight: "900", letterSpacing: 0.3 },
+  matchMetaRight: { color: "#7E95B0", fontSize: 8.5, fontWeight: "800" },
+  matchTeamsWrap: { marginTop: 9, position: "relative", paddingRight: 64 },
+  clubLine: { minHeight: 25, flexDirection: "row", alignItems: "center", gap: 7 },
+  clubDot: { width: 5, height: 5, borderRadius: 99, backgroundColor: "#365C7D" },
+  clubDotOur: { backgroundColor: "#F28B25" },
+  teamLine: { color: "#B9C9D9", fontSize: 11, fontWeight: "800", flex: 1 },
+  teamLineOur: { color: "#FFFFFF", fontWeight: "900" },
+  scorePill: { position: "absolute", right: 0, top: 8, minWidth: 52, minHeight: 31, borderRadius: 10, backgroundColor: "#302719", borderWidth: 1, borderColor: "#654725", alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
+  scoreText: { color: "#F28B25", fontSize: 10.5, fontWeight: "900" },
+  venueRow: { marginTop: 7, paddingTop: 7, borderTopWidth: 1, borderTopColor: "#123858", flexDirection: "row", alignItems: "center", gap: 4 },
+  matchVenue: { color: "#607B98", fontSize: 8.3, flex: 1 },
+  tableCard: { backgroundColor: "#051E3B", borderRadius: 17, borderWidth: 1, borderColor: "#153A5D", overflow: "hidden" },
+  table: {},
+  tableHeader: { minHeight: 35, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, backgroundColor: "#03172E", borderBottomWidth: 1, borderBottomColor: "#123858" },
+  th: { color: "#607B98", fontSize: 7.8, fontWeight: "900", letterSpacing: 0.4 },
+  tableRow: { minHeight: 43, flexDirection: "row", alignItems: "center", paddingHorizontal: 10, borderBottomWidth: 1, borderBottomColor: "#0F3153" },
+  tableRowOur: { backgroundColor: "rgba(242,139,37,0.08)" },
+  rankText: { width: 34, color: "#7D94B1", fontSize: 9.5, fontWeight: "900" },
+  td: { color: "#B9C9D9", fontSize: 9.5, fontWeight: "800" },
+  tableTextOur: { color: "#FFFFFF", fontWeight: "900" },
+  pointsText: { width: 58, textAlign: "right", color: "#9CB1C7", fontSize: 9.5, fontWeight: "900" },
+  pointsTextOur: { color: "#F28B25" },
+  emptyCard: { minHeight: 120, borderRadius: 17, borderWidth: 1, borderColor: "#153A5D", backgroundColor: "#041A34", alignItems: "center", justifyContent: "center", padding: 18 },
+  emptyInner: { minHeight: 90, alignItems: "center", justifyContent: "center", padding: 15 },
+  emptyTitle: { color: "#DCE6F1", fontSize: 11.5, fontWeight: "900", marginTop: 7 },
+  emptyText: { color: "#667F9B", fontSize: 8.7, lineHeight: 12, marginTop: 3, textAlign: "center" },
 });

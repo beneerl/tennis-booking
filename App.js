@@ -10,6 +10,9 @@ import ProfileScreen from "./screens/ProfileScreen";
 import TeamsScreen from "./screens/TeamsScreen";
 import TeamDetailsScreen from "./screens/TeamDetailsScreen";
 import LKScreen from "./screens/LKScreen";
+import TournamentScreen from "./screens/TournamentScreen";
+import TournamentBracketScreen from "./screens/TournamentBracketScreen";
+import TournamentAdminScreen from "./screens/TournamentAdminScreen";
 
 const Stack = createNativeStackNavigator();
 
@@ -28,6 +31,9 @@ config: {
     Teams: "teams",
     TeamDetails: "teams/:teamId",
     LK: "lk",
+    Tournament: "turnier",
+    TournamentBracket: "turnier/baum/:drawId",
+    TournamentAdmin: "admin/turnier",
   },
 },
 
@@ -64,6 +70,9 @@ export default function App() {
         <Stack.Screen name="Teams" component={TeamsScreen} />
         <Stack.Screen name="TeamDetails" component={TeamDetailsScreen} />
         <Stack.Screen name="LK" component={LKScreen} />
+        <Stack.Screen name="Tournament" component={TournamentScreen} />
+        <Stack.Screen name="TournamentBracket" component={TournamentBracketScreen} />
+        <Stack.Screen name="TournamentAdmin" component={TournamentAdminScreen} />
         
       </Stack.Navigator>
     </NavigationContainer>

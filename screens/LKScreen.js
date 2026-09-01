@@ -328,17 +328,19 @@ export default function LKScreen() {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
-        <View style={styles.headerRow}>
-          <View style={styles.headerIconSpacer} />
-          <View style={styles.headerCenter}>
-            <Text style={styles.headerTitle}>LK</Text>
-            <Text style={styles.headerSubtitle}>LK-Rechner</Text>
-          </View>
-          <View style={styles.headerIconWrap}>
+        <View style={styles.header}>
+          <View style={styles.headerIconBox}>
             <Ionicons name="stats-chart-outline" size={20} color="#F28B25" />
           </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.headerKicker}>TENNIS TACHERTING</Text>
+            <Text style={styles.headerTitle}>LK-Rechner</Text>
+          </View>
         </View>
-        <Text style={styles.muted}>Lade…</Text>
+        <View style={styles.loadingWrap}>
+          <Ionicons name="sync-outline" size={24} color="#7187A4" />
+          <Text style={styles.muted}>Lade LK-Daten…</Text>
+        </View>
       </View>
     );
   }
@@ -347,96 +349,142 @@ export default function LKScreen() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      <View style={styles.headerRow}>
-        <View style={styles.headerIconSpacer} />
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>LK</Text>
-          <Text style={styles.headerSubtitle}>LK-Rechner</Text>
-        </View>
-        <View style={styles.headerIconWrap}>
+      <View style={styles.header}>
+        <View style={styles.headerIconBox}>
           <Ionicons name="stats-chart-outline" size={20} color="#F28B25" />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerKicker}>TENNIS TACHERTING</Text>
+          <Text style={styles.headerTitle}>LK-Rechner</Text>
+        </View>
+        <View style={styles.headerMiniBadge}>
+          <Text style={styles.headerMiniLabel}>LK</Text>
+          <Text style={styles.headerMiniValue}>{fmt(headerLK)}</Text>
         </View>
       </View>
 
       <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 24, paddingHorizontal: 14 }}
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Aktuelle LK</Text>
-          <TextInput
-            value={currentLKText}
-            onChangeText={(t) => {
-              const cleaned = String(t).replace(".", ",");
-              setCurrentLKText(cleaned);
-              const n = toNumber(cleaned);
-              if (n != null) setCurrentLK(n);
-            }}
-            keyboardType="numbers-and-punctuation"
-            style={styles.input}
-            placeholder="z.B. 16,3"
-            placeholderTextColor="#7f93b0"
-          />
-          <Text style={styles.bigLK}>{fmt(headerLK)}</Text>
-
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>LK nach Eintrag aktualisieren</Text>
-            <Switch value={autoUpdate} onValueChange={setAutoUpdate} />
+        <View style={styles.lkHero}>
+          <View style={styles.lkHeroTop}>
+            <View>
+              <Text style={styles.eyebrow}>DEINE AKTUELLE LK</Text>
+              <Text style={styles.lkHeroValue}>{fmt(headerLK)}</Text>
+            </View>
+            <View style={styles.lkHeroIcon}>
+              <Ionicons name="speedometer-outline" size={24} color="#F28B25" />
+            </View>
           </View>
 
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Motivationsaufschlag berücksichtigen</Text>
-            <Switch value={useMotivation} onValueChange={setUseMotivation} />
+          <View style={styles.inlineField}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.fieldLabelSmall}>LK manuell anpassen</Text>
+              <TextInput
+                value={currentLKText}
+                onChangeText={(t) => {
+                  const cleaned = String(t).replace(".", ",");
+                  setCurrentLKText(cleaned);
+                  const n = toNumber(cleaned);
+                  if (n != null) setCurrentLK(n);
+                }}
+                keyboardType="numbers-and-punctuation"
+                style={styles.compactInput}
+                placeholder="z.B. 16,3"
+                placeholderTextColor="#637B98"
+              />
+            </View>
+            <View style={styles.profilePill}>
+              <Ionicons name="person-outline" size={13} color="#7187A4" />
+              <Text style={styles.profilePillText} numberOfLines={1}>{userName}</Text>
+            </View>
           </View>
 
-          <Text style={styles.note}>
-            Motivation: +0,025 je voller Woche seit dem letzten Eintrag (bis LK 25).
-          </Text>
-          <Text style={styles.note}>Dein Name: {userName}</Text>
+          <View style={styles.settingsBox}>
+            <View style={styles.settingRow}>
+              <View style={styles.settingIcon}>
+                <Ionicons name="refresh-outline" size={17} color="#79E0BE" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingTitle}>Automatisch aktualisieren</Text>
+                <Text style={styles.settingSub}>Neue Ergebnisse direkt auf deine LK anwenden.</Text>
+              </View>
+              <Switch
+                value={autoUpdate}
+                onValueChange={setAutoUpdate}
+                trackColor={{ false: "#173A5D", true: "#8A5428" }}
+                thumbColor={autoUpdate ? "#F28B25" : "#7187A4"}
+              />
+            </View>
+
+            <View style={[styles.settingRow, styles.settingRowBorder]}>
+              <View style={styles.settingIcon}>
+                <Ionicons name="time-outline" size={17} color="#8EA9C6" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.settingTitle}>Motivationsaufschlag</Text>
+                <Text style={styles.settingSub}>+0,025 je voller Woche seit dem letzten Eintrag.</Text>
+              </View>
+              <Switch
+                value={useMotivation}
+                onValueChange={setUseMotivation}
+                trackColor={{ false: "#173A5D", true: "#8A5428" }}
+                thumbColor={useMotivation ? "#F28B25" : "#7187A4"}
+              />
+            </View>
+          </View>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Match eintragen</Text>
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.eyebrow}>BERECHNUNG</Text>
+            <Text style={styles.sectionTitle}>Match eintragen</Text>
+          </View>
+          <View style={styles.sectionIcon}>
+            <Ionicons name="tennisball-outline" size={19} color="#F28B25" />
+          </View>
+        </View>
 
-          <View style={styles.segRow}>
+        <View style={styles.formCard}>
+          <Text style={styles.groupLabel}>MATCHART</Text>
+          <View style={styles.segmentRow}>
             <TouchableOpacity
-              style={[styles.seg, type === "single" && styles.segActive]}
+              style={[styles.segment, type === "single" && styles.segmentActive]}
               onPress={() => setType("single")}
-              activeOpacity={0.9}
+              activeOpacity={0.88}
             >
-              <Text style={[styles.segText, type === "single" && styles.segTextActive]}>
-                Einzel
-              </Text>
+              <Ionicons name="person-outline" size={16} color={type === "single" ? "#001738" : "#91A7C0"} />
+              <Text style={[styles.segmentText, type === "single" && styles.segmentTextActive]}>Einzel</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.seg, type === "double" && styles.segActive]}
+              style={[styles.segment, type === "double" && styles.segmentActive]}
               onPress={() => setType("double")}
-              activeOpacity={0.9}
+              activeOpacity={0.88}
             >
-              <Text style={[styles.segText, type === "double" && styles.segTextActive]}>
-                Doppel
-              </Text>
+              <Ionicons name="people-outline" size={16} color={type === "double" ? "#001738" : "#91A7C0"} />
+              <Text style={[styles.segmentText, type === "double" && styles.segmentTextActive]}>Doppel</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={styles.segRow}>
+          <Text style={[styles.groupLabel, { marginTop: 14 }]}>ERGEBNIS</Text>
+          <View style={styles.segmentRow}>
             <TouchableOpacity
-              style={[styles.seg, result === "W" && styles.segActive]}
+              style={[styles.segment, result === "W" && styles.segmentWin]}
               onPress={() => setResult("W")}
-              activeOpacity={0.9}
+              activeOpacity={0.88}
             >
-              <Text style={[styles.segText, result === "W" && styles.segTextActive]}>
-                Sieg
-              </Text>
+              <Ionicons name="trophy-outline" size={16} color={result === "W" ? "#001738" : "#91A7C0"} />
+              <Text style={[styles.segmentText, result === "W" && styles.segmentTextActive]}>Sieg</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.seg, result === "L" && styles.segActive]}
+              style={[styles.segment, result === "L" && styles.segmentLoss]}
               onPress={() => setResult("L")}
-              activeOpacity={0.9}
+              activeOpacity={0.88}
             >
-              <Text style={[styles.segText, result === "L" && styles.segTextActive]}>
-                Niederlage
-              </Text>
+              <Ionicons name="close-circle-outline" size={16} color={result === "L" ? "#F5C1C1" : "#91A7C0"} />
+              <Text style={[styles.segmentText, result === "L" && styles.segmentLossText]}>Niederlage</Text>
             </TouchableOpacity>
           </View>
 
@@ -449,28 +497,33 @@ export default function LKScreen() {
                 keyboardType="numbers-and-punctuation"
                 style={styles.input}
                 placeholder="z.B. 18,5"
-                placeholderTextColor="#7f93b0"
+                placeholderTextColor="#637B98"
               />
 
-              <Text style={styles.label}>Gegner-LK 1</Text>
-              <TextInput
-                value={opponentLK}
-                onChangeText={setOpponentLK}
-                keyboardType="numbers-and-punctuation"
-                style={styles.input}
-                placeholder="z.B. 14,8"
-                placeholderTextColor="#7f93b0"
-              />
-
-              <Text style={styles.label}>Gegner-LK 2</Text>
-              <TextInput
-                value={opponentPartnerLK}
-                onChangeText={setOpponentPartnerLK}
-                keyboardType="numbers-and-punctuation"
-                style={styles.input}
-                placeholder="z.B. 16,2"
-                placeholderTextColor="#7f93b0"
-              />
+              <View style={styles.twoCol}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Gegner-LK 1</Text>
+                  <TextInput
+                    value={opponentLK}
+                    onChangeText={setOpponentLK}
+                    keyboardType="numbers-and-punctuation"
+                    style={styles.input}
+                    placeholder="z.B. 14,8"
+                    placeholderTextColor="#637B98"
+                  />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.label}>Gegner-LK 2</Text>
+                  <TextInput
+                    value={opponentPartnerLK}
+                    onChangeText={setOpponentPartnerLK}
+                    keyboardType="numbers-and-punctuation"
+                    style={styles.input}
+                    placeholder="z.B. 16,2"
+                    placeholderTextColor="#637B98"
+                  />
+                </View>
+              </View>
             </>
           ) : (
             <>
@@ -481,40 +534,66 @@ export default function LKScreen() {
                 keyboardType="numbers-and-punctuation"
                 style={styles.input}
                 placeholder="z.B. 14,8"
-                placeholderTextColor="#7f93b0"
+                placeholderTextColor="#637B98"
               />
             </>
           )}
 
           <TouchableOpacity style={styles.primaryBtn} onPress={onAddMatch} activeOpacity={0.9}>
+            <Ionicons name="add-circle-outline" size={18} color="#001738" />
             <Text style={styles.primaryText}>Eintrag speichern</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.secondaryBtn} onPress={onUndo} activeOpacity={0.9}>
-            <Text style={styles.secondaryText}>Letzten Eintrag rückgängig</Text>
+          <TouchableOpacity style={styles.undoBtn} onPress={onUndo} activeOpacity={0.88}>
+            <Ionicons name="arrow-undo-outline" size={15} color="#8198B4" />
+            <Text style={styles.undoText}>Letzten Eintrag rückgängig</Text>
           </TouchableOpacity>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Verlauf</Text>
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.eyebrow}>VERLAUF</Text>
+            <Text style={styles.sectionTitle}>Letzte Matches</Text>
+          </View>
+          <View style={styles.historyCount}>
+            <Text style={styles.historyCountText}>{history.length}</Text>
+          </View>
+        </View>
 
-          {history.length === 0 ? (
-            <Text style={styles.muted}>Noch keine Einträge.</Text>
-          ) : (
-            history.map((h) => (
-              <View key={h.id} style={styles.historyRow}>
-                <Text style={styles.hMain}>
-                  {h.result === "W" ? "✅ Sieg" : "❌ Niederlage"} ·{" "}
-                  {h.type === "single" ? "Einzel" : "Doppel"} · Gegner {fmt(h.opponentLK)}
+        {history.length === 0 ? (
+          <View style={styles.emptyCard}>
+            <Ionicons name="document-text-outline" size={24} color="#4E6988" />
+            <Text style={styles.emptyTitle}>Noch keine Einträge</Text>
+            <Text style={styles.emptyText}>Deine berechneten LK-Matches erscheinen hier.</Text>
+          </View>
+        ) : (
+          history.map((h) => (
+            <View key={h.id} style={styles.historyCard}>
+              <View style={[styles.resultIcon, h.result === "W" ? styles.resultIconWin : styles.resultIconLoss]}>
+                <Ionicons
+                  name={h.result === "W" ? "trophy-outline" : "close-outline"}
+                  size={17}
+                  color={h.result === "W" ? "#F28B25" : "#F0A7A7"}
+                />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.historyTitle}>
+                  {h.result === "W" ? "Sieg" : "Niederlage"} · {h.type === "single" ? "Einzel" : "Doppel"}
                 </Text>
-                <Text style={styles.hSub}>
-                  LK {fmt(h.lkBefore)} → {fmt(h.lkAfter)} · Δ {fmt(h.delta)}
-                  {h.motivationApplied ? ` · Motivation +${fmt(h.motivationApplied)}` : ""}
+                <Text style={styles.historyMeta}>Gegner LK {fmt(h.opponentLK)}</Text>
+                <Text style={styles.historyChange}>LK {fmt(h.lkBefore)} → {fmt(h.lkAfter)}</Text>
+                {!!h.motivationApplied && (
+                  <Text style={styles.historyMotivation}>Motivation +{fmt(h.motivationApplied)}</Text>
+                )}
+              </View>
+              <View style={[styles.deltaPill, h.delta > 0 && styles.deltaPillPositive]}>
+                <Text style={[styles.deltaText, h.delta > 0 && styles.deltaTextPositive]}>
+                  {h.delta > 0 ? `−${fmt(h.delta)}` : "0"}
                 </Text>
               </View>
-            ))
-          )}
-        </View>
+            </View>
+          ))
+        )}
       </ScrollView>
 
       <BottomNav navigation={navigation} active="LK" />
@@ -523,194 +602,69 @@ export default function LKScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#00152F", paddingTop: 40 },
-
-  headerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 12,
-    paddingHorizontal: 14,
-  },
-  headerIconSpacer: { width: 40, height: 40 },
-  headerCenter: { flex: 1, alignItems: "center" },
-  headerIconWrap: { width: 40, height: 40, borderRadius: 13, backgroundColor: "#082A52", borderWidth: 1, borderColor: "#173F69", alignItems: "center", justifyContent: "center" },
-  headerTitle: { color: "#ffffff", fontSize: 19, fontWeight: "900" },
-  headerSubtitle: { color: "#7187A4", fontSize: 10, marginTop: 2, fontWeight: "700" },
-
-  tabsRow: { flexDirection: "row", gap: 8, marginBottom: 10, paddingHorizontal: 14 },
-  tabBtn: {
-    flex: 1,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#173F69",
-    paddingVertical: 10,
-    alignItems: "center",
-    backgroundColor: "#082A52",
-  },
-  tabBtnActive: { backgroundColor: "#F28B25", borderColor: "#F28B25" },
-  tabText: { color: "#ffffff", fontSize: 13, fontWeight: "900" },
-  tabTextActive: { color: "#001738" },
-
-  card: {
-    backgroundColor: "#062447",
-    borderRadius: 18,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: "#173F69",
-    marginBottom: 12,
-  },
-  cardTitle: { color: "#fff", fontSize: 14, fontWeight: "900", marginBottom: 10 },
-  muted: { color: "#9fb0c8" },
-
-  input: {
-    borderWidth: 1,
-    borderColor: "#173F69",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: "#fff",
-    fontWeight: "800",
-  },
-  bigLK: { marginTop: 10, color: "#F28B25", fontSize: 28, fontWeight: "900", textAlign: "center" },
-
-  row: { marginTop: 12, flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 12 },
-  rowLabel: { color: "#c3d0ea", fontSize: 12, fontWeight: "800", flex: 1 },
-
-  note: { marginTop: 10, color: "#9fb0c8", fontSize: 12, lineHeight: 16 },
-
-  label: { marginTop: 12, color: "#c3d0ea", fontSize: 12, fontWeight: "900", marginBottom: 6 },
-
-  segRow: { flexDirection: "row", gap: 10, marginBottom: 10 },
-  seg: {
-    flex: 1,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#173F69",
-    paddingVertical: 10,
-    alignItems: "center",
-    backgroundColor: "#082A52",
-  },
-  segActive: { backgroundColor: "#F28B25", borderColor: "#F28B25" },
-  segText: { color: "#fff", fontSize: 13, fontWeight: "900" },
-  segTextActive: { color: "#001738" },
-
-  primaryBtn: {
-    marginTop: 12,
-    backgroundColor: "#F28B25",
-    borderRadius: 14,
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  primaryText: { color: "#001738", fontWeight: "900" },
-
-  secondaryBtn: {
-    marginTop: 10,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#173F69",
-    paddingVertical: 12,
-    alignItems: "center",
-  },
-  secondaryText: { color: "#fff", fontWeight: "900" },
-
-  historyRow: { paddingVertical: 10, borderTopWidth: 1, borderTopColor: "rgba(255,255,255,0.08)" },
-  hMain: { color: "#fff", fontWeight: "900", fontSize: 12 },
-  hSub: { color: "#9fb0c8", marginTop: 4, fontSize: 12, fontWeight: "800" },
-
-  // Rangliste
-  boardRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.08)",
-  },
-  boardHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 10,
-  },
-
-
-
-  refreshBtn: {
-    width: 44,
-    height: 34,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#173F69",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  refreshText: { color: "#ffffff", fontSize: 18, fontWeight: "900" },
-
-  boardRank: { width: 36, color: "#9fb0c8", fontWeight: "900" },
-  boardName: { color: "#ffffff", fontWeight: "900" },
-  boardMeta: { color: "#9fb0c8", marginTop: 2, fontSize: 11, fontWeight: "800" },
-  boardLK: { color: "#F28B25", fontWeight: "900", fontSize: 14 },
-
-  // Partner Picker Modal
-  pickBtn: {
-    marginTop: 8,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#173F69",
-    paddingVertical: 10,
-    alignItems: "center",
-    backgroundColor: "#082A52",
-  },
-  pickBtnText: { color: "#ffffff", fontWeight: "900" },
-
-  modalOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    top: 0,
-    bottom: 0,
-    backgroundColor: "rgba(0,0,0,0.45)",
-    justifyContent: "flex-end",
-    alignItems: "center",
-  },
-  modalBox: {
-    width: "96%",
-    backgroundColor: "#001e4f",
-    borderRadius: 22,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: "#173F69",
-    marginBottom: 24,
-  },
-  modalHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  modalTitle: { color: "#fff", fontSize: 16, fontWeight: "900" },
-  modalClose: { padding: 8 },
-  modalCloseText: { color: "#fff", fontSize: 16, fontWeight: "900" },
-
-  searchInput: {
-    marginTop: 10,
-    borderWidth: 1,
-    borderColor: "#173F69",
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: "#fff",
-    fontWeight: "800",
-  },
-
-  pickerRow: {
-    marginTop: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: "#173F69",
-    backgroundColor: "#082A52",
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-  },
-  pickerName: { color: "#fff", fontWeight: "900", flex: 1, paddingRight: 10 },
-  pickerLK: { color: "#F28B25", fontWeight: "900" },
+  container: { flex: 1, backgroundColor: "#001738", paddingTop: 40 },
+  scroll: { flex: 1 },
+  scrollContent: { paddingHorizontal: 15, paddingBottom: 26 },
+  header: { flexDirection: "row", alignItems: "center", gap: 11, paddingHorizontal: 15, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: "#123356" },
+  headerIconBox: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#08264A", borderWidth: 1, borderColor: "#173F66", alignItems: "center", justifyContent: "center" },
+  headerKicker: { color: "#7187A4", fontSize: 8.5, fontWeight: "900", letterSpacing: 0.8 },
+  headerTitle: { color: "#FFFFFF", fontSize: 20, fontWeight: "900", marginTop: 1 },
+  headerMiniBadge: { minWidth: 54, height: 42, borderRadius: 13, backgroundColor: "#302719", borderWidth: 1, borderColor: "#6C4B28", alignItems: "center", justifyContent: "center", paddingHorizontal: 8 },
+  headerMiniLabel: { color: "#A78155", fontSize: 7, fontWeight: "900", letterSpacing: 0.6 },
+  headerMiniValue: { color: "#F28B25", fontSize: 14, fontWeight: "900", marginTop: 1 },
+  loadingWrap: { flex: 1, alignItems: "center", justifyContent: "center", gap: 8 },
+  muted: { color: "#8DA4BF", fontSize: 11 },
+  lkHero: { marginTop: 15, backgroundColor: "#051E3B", borderRadius: 20, borderWidth: 1, borderColor: "#173F66", padding: 15 },
+  lkHeroTop: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  eyebrow: { color: "#7187A4", fontSize: 8, fontWeight: "900", letterSpacing: 1.1 },
+  lkHeroValue: { color: "#FFFFFF", fontSize: 42, lineHeight: 48, fontWeight: "900", letterSpacing: -1.5, marginTop: 2 },
+  lkHeroIcon: { width: 50, height: 50, borderRadius: 16, backgroundColor: "rgba(242,139,37,0.09)", borderWidth: 1, borderColor: "rgba(242,139,37,0.23)", alignItems: "center", justifyContent: "center" },
+  inlineField: { marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: "#123858", flexDirection: "row", alignItems: "flex-end", gap: 10 },
+  fieldLabelSmall: { color: "#6F87A4", fontSize: 8.5, fontWeight: "800", marginBottom: 5 },
+  compactInput: { minHeight: 40, borderRadius: 11, backgroundColor: "#03172E", borderWidth: 1, borderColor: "#153A5D", paddingHorizontal: 10, color: "#FFFFFF", fontSize: 12, fontWeight: "800" },
+  profilePill: { maxWidth: 130, minHeight: 40, borderRadius: 11, backgroundColor: "#071D38", borderWidth: 1, borderColor: "#143858", paddingHorizontal: 9, flexDirection: "row", alignItems: "center", gap: 5 },
+  profilePillText: { color: "#8198B4", fontSize: 9.5, fontWeight: "800", flexShrink: 1 },
+  settingsBox: { marginTop: 12, borderRadius: 14, backgroundColor: "#03172E", borderWidth: 1, borderColor: "#123858", overflow: "hidden" },
+  settingRow: { minHeight: 64, flexDirection: "row", alignItems: "center", gap: 9, paddingHorizontal: 10, paddingVertical: 8 },
+  settingRowBorder: { borderTopWidth: 1, borderTopColor: "#123858" },
+  settingIcon: { width: 32, height: 32, borderRadius: 10, backgroundColor: "#092943", alignItems: "center", justifyContent: "center" },
+  settingTitle: { color: "#DDE8F3", fontSize: 10.5, fontWeight: "900" },
+  settingSub: { color: "#657F9D", fontSize: 8.4, lineHeight: 12, marginTop: 2, paddingRight: 6 },
+  sectionHeader: { marginTop: 20, marginBottom: 9, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  sectionTitle: { color: "#FFFFFF", fontSize: 19, fontWeight: "900", letterSpacing: -0.3, marginTop: 2 },
+  sectionIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: "#302719", borderWidth: 1, borderColor: "#654725", alignItems: "center", justifyContent: "center" },
+  formCard: { backgroundColor: "#051E3B", borderRadius: 20, borderWidth: 1, borderColor: "#173F66", padding: 14 },
+  groupLabel: { color: "#6D86A5", fontSize: 7.8, fontWeight: "900", letterSpacing: 0.85, marginBottom: 6 },
+  segmentRow: { flexDirection: "row", gap: 8 },
+  segment: { flex: 1, minHeight: 43, borderRadius: 12, backgroundColor: "#03172E", borderWidth: 1, borderColor: "#173A5D", flexDirection: "row", gap: 6, alignItems: "center", justifyContent: "center" },
+  segmentActive: { backgroundColor: "#F28B25", borderColor: "#F28B25" },
+  segmentWin: { backgroundColor: "#F28B25", borderColor: "#F28B25" },
+  segmentLoss: { backgroundColor: "#352331", borderColor: "#6F3D57" },
+  segmentText: { color: "#91A7C0", fontSize: 10.5, fontWeight: "900" },
+  segmentTextActive: { color: "#001738" },
+  segmentLossText: { color: "#F5C1C1" },
+  label: { marginTop: 13, color: "#829AB7", fontSize: 9, fontWeight: "800", marginBottom: 5 },
+  input: { minHeight: 43, borderRadius: 12, backgroundColor: "#03172E", borderWidth: 1, borderColor: "#173A5D", paddingHorizontal: 11, color: "#FFFFFF", fontSize: 11.5, fontWeight: "800" },
+  twoCol: { flexDirection: "row", gap: 8 },
+  primaryBtn: { marginTop: 15, minHeight: 46, borderRadius: 13, backgroundColor: "#F28B25", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 7 },
+  primaryText: { color: "#001738", fontSize: 11, fontWeight: "900" },
+  undoBtn: { marginTop: 8, minHeight: 39, borderRadius: 12, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, backgroundColor: "#061B35", borderWidth: 1, borderColor: "#123858" },
+  undoText: { color: "#8198B4", fontSize: 9.5, fontWeight: "800" },
+  historyCount: { minWidth: 34, height: 30, borderRadius: 10, backgroundColor: "#08264A", borderWidth: 1, borderColor: "#173F66", alignItems: "center", justifyContent: "center" },
+  historyCountText: { color: "#9FB1C7", fontSize: 10, fontWeight: "900" },
+  emptyCard: { minHeight: 120, borderRadius: 18, borderWidth: 1, borderColor: "#153A5D", backgroundColor: "#041A34", alignItems: "center", justifyContent: "center", padding: 18 },
+  emptyTitle: { color: "#DCE6F1", fontSize: 12, fontWeight: "900", marginTop: 7 },
+  emptyText: { color: "#667F9B", fontSize: 9, marginTop: 3, textAlign: "center" },
+  historyCard: { minHeight: 78, backgroundColor: "#051E3B", borderRadius: 16, borderWidth: 1, borderColor: "#153A5D", padding: 10, flexDirection: "row", alignItems: "center", gap: 10, marginBottom: 8 },
+  resultIcon: { width: 38, height: 38, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1 },
+  resultIconWin: { backgroundColor: "rgba(242,139,37,0.08)", borderColor: "rgba(242,139,37,0.24)" },
+  resultIconLoss: { backgroundColor: "rgba(205,102,120,0.08)", borderColor: "rgba(205,102,120,0.23)" },
+  historyTitle: { color: "#E4EDF5", fontSize: 11, fontWeight: "900" },
+  historyMeta: { color: "#7790AD", fontSize: 8.7, marginTop: 2 },
+  historyChange: { color: "#9FB1C7", fontSize: 9.3, fontWeight: "800", marginTop: 3 },
+  historyMotivation: { color: "#6E88A5", fontSize: 7.8, marginTop: 2 },
+  deltaPill: { minWidth: 40, minHeight: 30, borderRadius: 10, backgroundColor: "#0B2947", alignItems: "center", justifyContent: "center", paddingHorizontal: 7 },
+  deltaPillPositive: { backgroundColor: "#302719" },
+  deltaText: { color: "#7189A6", fontSize: 9, fontWeight: "900" },
+  deltaTextPositive: { color: "#F28B25" },
 });

@@ -85,6 +85,13 @@ function timeToMinutes(hhmm) {
   return h * 60 + m;
 }
 
+function minutesToTime(total) {
+  const safe = ((Number(total) % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const h = Math.floor(safe / 60);
+  const m = safe % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
+}
+
 function isNetworkFetchError(err) {
   const msg = String(err?.message || err || "").toLowerCase();
   return (
@@ -97,7 +104,7 @@ function isNetworkFetchError(err) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-export default function BookingScreen({ navigation }) {
+export default function BookingScreen({ navigation, route }) {
   // WICHTIG: Identitaet und Admin-Rolle kommen nie aus route.params/URL.
   const [userName, setUserName] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
@@ -114,6 +121,8 @@ const lastFetchWarnRef = useRef(0);
   const [weeklyRules, setWeeklyRules] = useState([]);
   const [weeklyExceptions, setWeeklyExceptions] = useState([]);
   const [specialBlocks, setSpecialBlocks] = useState([]);
+  const [tournamentBookingMatch, setTournamentBookingMatch] = useState(null);
+  const [tournamentMatchMap, setTournamentMatchMap] = useState({});
 
   const [courtClosures, setCourtClosures] = useState({ 0: false, 1: false, 2: false });
 const [courtClosureReason, setCourtClosureReason] = useState({ 0: "", 1: "", 2: "" });
@@ -313,6 +322,38 @@ useEffect(() => {
 }, [navigation]);
 
 useEffect(() => {
+  const matchId = route?.params?.tournamentMatchId || null;
+  if (!myUserId || !matchId) {
+    if (!matchId) setTournamentBookingMatch(null);
+    return;
+  }
+
+  let active = true;
+  (async () => {
+    try {
+      const { data, error } = await supabase
+        .from("tournament_matches")
+        .select("*")
+        .eq("id", matchId)
+        .maybeSingle();
+      if (error) throw error;
+      if (!active || !data) return;
+      const participant = data.player1_auth_id === myUserId || data.player2_auth_id === myUserId;
+      if (!participant || data.status === "completed") {
+        setTournamentBookingMatch(null);
+        showMessage("Vereinsmeisterschaft", participant ? "Dieses Match ist bereits abgeschlossen." : "Du bist an diesem Match nicht beteiligt.");
+        return;
+      }
+      setTournamentBookingMatch(data);
+    } catch (e) {
+      console.log("Tournament booking match:", e?.message || e);
+      setTournamentBookingMatch(null);
+    }
+  })();
+  return () => { active = false; };
+}, [myUserId, route?.params?.tournamentMatchId]);
+
+useEffect(() => {
   const interval = setInterval(() => {
     setNowTick(Date.now());
   }, 60 * 1000); // jede Minute aktualisieren
@@ -410,12 +451,14 @@ const loadBookingsForDate = async (dateKey) => {
       userName: row.user_name,
       coPlayerName: row.player2 || "",
       bookingGroupId: row.booking_group_id || null,
+      tournamentMatchId: row.tournament_match_id || null,
     }));
 
     // 4) Pending deletes filtern
     const filtered = mapped.filter((b) => !pendingDeleteRef.current.has(b.id));
     setBookings(filtered);
     setIsRetryingBookings(false);
+    loadTournamentMatchMap(filtered.map((b) => b.tournamentMatchId).filter(Boolean));
 
     console.log(`Bookings loaded for ${dateKey}:`, filtered.length);
   } catch (e) {
@@ -583,6 +626,29 @@ useEffect(() => {
     setWeeklyExceptions(mapped);
   } catch (e) {
     console.log("weekly_block_exceptions load exception:", String(e));
+  }
+};
+
+const loadTournamentMatchMap = async (ids = []) => {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (!unique.length) {
+    setTournamentMatchMap({});
+    return;
+  }
+  try {
+    const { data, error } = await supabase
+      .from("tournament_matches")
+      .select("id, round_name, player1_name, player2_name, status")
+      .in("id", unique);
+    if (error) {
+      console.log("tournament match labels:", error.message);
+      return;
+    }
+    const map = {};
+    (data || []).forEach((m) => { map[m.id] = m; });
+    setTournamentMatchMap(map);
+  } catch (e) {
+    console.log("tournament match labels exception:", e?.message || e);
   }
 };
 
@@ -789,7 +855,7 @@ const isBlocked = (courtIndex, time) => !!getBlockInfoForSlot(courtIndex, time);
     return bookings.find((b) => b.id === id);
   };
 
-const deleteBookingFromSupabase = async (courtIndex, time, bookingGroupId = null, localIds = []) => {
+const deleteBookingFromSupabase = async (courtIndex, time, bookingGroupId = null, localIds = [], tournamentMatchId = null) => {
   const fallbackId = `${courtIndex}-${time}-${currentDateKey}`;
   const ids = localIds.length ? localIds : [fallbackId];
   ids.forEach((id) => pendingDeleteRef.current.add(id));
@@ -812,6 +878,12 @@ const deleteBookingFromSupabase = async (courtIndex, time, bookingGroupId = null
       console.log("Supabase delete error:", error.message);
       showMessage("DB-Fehler (Löschen)", error.message);
       await loadBookingsForDate(currentDateKey);
+      return;
+    }
+
+    if (tournamentMatchId) {
+      const { error: unlinkError } = await supabase.rpc("tournament_unlink_booking", { p_match_id: tournamentMatchId });
+      if (unlinkError) console.log("Tournament unlink:", unlinkError.message);
     }
   } catch (e) {
     ids.forEach((id) => pendingDeleteRef.current.delete(id));
@@ -822,7 +894,7 @@ const deleteBookingFromSupabase = async (courtIndex, time, bookingGroupId = null
 };
 
 
-const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName) => {
+const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName, tournamentMatchId = null) => {
   try {
     // Session holen -> user_id
     const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
@@ -848,14 +920,16 @@ const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName)
       player2: coPlayerName || null,
       user_id: userId,
       booking_group_id: bookingGroupId,
+      tournament_match_id: tournamentMatchId || null,
     }));
 
     let groupPersisted = true;
     let { error } = await supabase.from("bookings123").insert(rows);
 
-    // Sicherheits-Fallback, falls die DB-Migration noch nicht ausgeführt wurde.
-    if (error && String(error.message || "").toLowerCase().includes("booking_group_id")) {
-      const legacyRows = rows.map(({ booking_group_id, ...rest }) => rest);
+    // Sicherheits-Fallback für ältere DB-Stände bei normalen Buchungen.
+    const insertMessage = String(error?.message || "").toLowerCase();
+    if (error && !tournamentMatchId && (insertMessage.includes("booking_group_id") || insertMessage.includes("tournament_match_id"))) {
+      const legacyRows = rows.map(({ booking_group_id, tournament_match_id, ...rest }) => rest);
       const retry = await supabase.from("bookings123").insert(legacyRows);
       error = retry.error;
       groupPersisted = false;
@@ -865,6 +939,23 @@ const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName)
       console.log("Supabase insert error:", error.message);
       showMessage("Buchung fehlgeschlagen", error.message);
       return false;
+    }
+
+    if (tournamentMatchId) {
+      const endTime = minutesToTime(timeToMinutes(times[times.length - 1]) + 30);
+      const { error: linkError } = await supabase.rpc("tournament_link_booking", {
+        p_match_id: tournamentMatchId,
+        p_booking_group_id: bookingGroupId,
+        p_booking_date: currentDateKey,
+        p_court_index: courtIndex,
+        p_from_time: times[0],
+        p_to_time: endTime,
+      });
+      if (linkError) {
+        await supabase.from("bookings123").delete().eq("booking_group_id", bookingGroupId);
+        showMessage("Turnierbuchung fehlgeschlagen", linkError.message);
+        return false;
+      }
     }
 
     return groupPersisted ? bookingGroupId : true;
@@ -949,7 +1040,7 @@ if (past && !isAdmin) {
         const groupIds = groupBookings.map((b) => b.id);
         const groupIdSet = new Set(groupIds);
         setBookings((prev) => prev.filter((b) => !groupIdSet.has(b.id)));
-        await deleteBookingFromSupabase(courtIndex, time, existing.bookingGroupId, groupIds);
+        await deleteBookingFromSupabase(courtIndex, time, existing.bookingGroupId, groupIds, existing.tournamentMatchId);
       })();
       return;
 
@@ -987,7 +1078,10 @@ if (past && !isAdmin) {
     setPendingSlot({ courtIndex, startTime: time, isSingleSlot });
     setEndOptions(options);
     setSelectedEndTime(options[0] || null);
-    setCoPlayerNameInput("");
+    const tournamentOpponent = tournamentBookingMatch
+      ? (tournamentBookingMatch.player1_auth_id === myUserId ? tournamentBookingMatch.player2_name : tournamentBookingMatch.player1_name)
+      : "";
+    setCoPlayerNameInput(tournamentOpponent || "");
     setBookingModalVisible(true);
   };
 
@@ -1045,13 +1139,15 @@ if (past && !isAdmin) {
       userName,
       coPlayerName: coName,
       bookingGroupId: null,
+      tournamentMatchId: tournamentBookingMatch?.id || null,
     }));
 
     setBookings((prev) => [...prev, ...newBookings]);
     const savedGroupId = await insertMultipleBookingsToSupabase(
       courtIndex,
       timesToBook,
-      coName
+      coName,
+      tournamentBookingMatch?.id || null
     );
 
     if (!savedGroupId) {
@@ -1063,6 +1159,11 @@ if (past && !isAdmin) {
       setBookings((prev) =>
         prev.map((b) => (savedIds.has(b.id) ? { ...b, bookingGroupId: savedGroupId } : b))
       );
+    }
+
+    if (savedGroupId && tournamentBookingMatch) {
+      setTournamentBookingMatch(null);
+      try { navigation.setParams({ tournamentMatchId: undefined }); } catch {}
     }
 
     setBookingModalVisible(false);
@@ -1088,15 +1189,13 @@ if (past && !isAdmin) {
       <View style={[styles.container, styles.centered]}>
         <StatusBar barStyle="light-content" />
         <View style={styles.loadingLogo}>
-          <Ionicons name="tennisball-outline" size={28} color="#F28B25" />
+          <Ionicons name="tennisball-outline" size={31} color="#F28B25" />
         </View>
         <ActivityIndicator color="#F28B25" />
         <Text style={styles.loadingText}>Anmeldung wird geprüft …</Text>
       </View>
     );
   }
-
-  const firstName = String(userName || "Spieler").trim().split(/\s+/)[0];
 
   return (
     <View style={styles.container}>
@@ -1106,12 +1205,9 @@ if (past && !isAdmin) {
       <View style={styles.appHeader}>
         <View style={styles.brandWrap}>
           <View style={styles.brandIcon}>
-            <Ionicons name="tennisball-outline" size={23} color="#F28B25" />
+            <Ionicons name="tennisball-outline" size={28} color="#F28B25" />
           </View>
-          <View>
-            <Text style={styles.brandTitle}>Tennis Booking</Text>
-            <Text style={styles.brandSubtitle}>Hallo {firstName}</Text>
-          </View>
+          <Text style={styles.brandTitle}>Tennis Tacherting</Text>
         </View>
 
         {isAdmin && (
@@ -1134,7 +1230,6 @@ if (past && !isAdmin) {
 
         <View style={styles.dateCenter}>
           <Text style={styles.dateText}>{formatDate(date)}</Text>
-          <Text style={styles.dateHint}>{isTodaySelected ? "Heute" : isPastDaySelected ? "Vergangener Tag" : "Buchungstag"}</Text>
         </View>
 
         {!isTodaySelected && (
@@ -1148,6 +1243,20 @@ if (past && !isAdmin) {
           <Ionicons name="chevron-forward" size={22} color="#FFFFFF" />
         </TouchableOpacity>
       </View>
+
+      {tournamentBookingMatch && (
+        <View style={styles.tournamentBookingBanner}>
+          <View style={styles.tournamentBookingIcon}><Ionicons name="trophy" size={18} color="#001738" /></View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.tournamentBookingKicker}>VEREINSMEISTERSCHAFT · {tournamentBookingMatch.round_name}</Text>
+            <Text style={styles.tournamentBookingTitle} numberOfLines={1}>{tournamentBookingMatch.player1_name} vs. {tournamentBookingMatch.player2_name}</Text>
+            <Text style={styles.tournamentBookingHint}>Wähle jetzt einen freien Platz und Zeitraum.</Text>
+          </View>
+          <TouchableOpacity onPress={() => { setTournamentBookingMatch(null); try { navigation.setParams({ tournamentMatchId: undefined }); } catch {} }}>
+            <Ionicons name="close-circle-outline" size={21} color="#8EA3BD" />
+          </TouchableOpacity>
+        </View>
+      )}
 
       {/* Court headers */}
       <View style={styles.courtHeaderRow}>
@@ -1210,6 +1319,8 @@ if (past && !isAdmin) {
                 const booking = getBookingForSlot(courtIndex, time);
                 const closed = isCourtClosed(courtIndex);
                 const ownBooking = !!booking && booking.userName === userName;
+                const tournamentMeta = booking?.tournamentMatchId ? tournamentMatchMap[booking.tournamentMatchId] : null;
+                const tournamentBooking = !!booking?.tournamentMatchId;
 
                 return (
                   <TouchableOpacity
@@ -1224,6 +1335,7 @@ if (past && !isAdmin) {
                       },
                       booked && !ownBooking && styles.slotCellBookedOther,
                       booked && ownBooking && styles.slotCellBookedOwn,
+                      tournamentBooking && styles.slotCellTournament,
                     ]}
                     onPress={() => handleSlotPress(courtIndex, time)}
                     onLongPress={() => {
@@ -1241,27 +1353,35 @@ if (past && !isAdmin) {
                         <Text style={styles.closedText}>Gesperrt</Text>
                       </>
                     ) : booking ? (
-                      <>
-                        {ownBooking && (
-                          <View style={styles.ownBadge}>
-                            <Text style={styles.ownBadgeText}>DEINE</Text>
-                          </View>
-                        )}
-                        <Text
-                          style={[styles.bookingNameText, ownBooking && styles.bookingNameOwn]}
-                          numberOfLines={2}
-                        >
-                          {ownBooking ? "Deine Buchung" : booking.userName}
-                        </Text>
-                        {!!booking.coPlayerName && (
+                      tournamentBooking ? (
+                        <>
+                          <View style={styles.vmBadge}><Ionicons name="trophy" size={14} color="#001738" /></View>
+                          <Text style={styles.vmPlayers} numberOfLines={2}>{booking.userName} vs. {booking.coPlayerName || tournamentMeta?.player2_name || "Gegner"}</Text>
+                          <Text style={styles.vmRound} numberOfLines={1}>{tournamentMeta?.round_name || "Vereinsmeisterschaft"}</Text>
+                        </>
+                      ) : (
+                        <>
+                          {ownBooking && (
+                            <View style={styles.ownBadge}>
+                              <Text style={styles.ownBadgeText}>DEINE</Text>
+                            </View>
+                          )}
                           <Text
-                            style={[styles.coPlayerText, ownBooking && styles.coPlayerOwn]}
-                            numberOfLines={1}
+                            style={[styles.bookingNameText, ownBooking && styles.bookingNameOwn]}
+                            numberOfLines={2}
                           >
-                            + {booking.coPlayerName}
+                            {ownBooking ? "Deine Buchung" : booking.userName}
                           </Text>
-                        )}
-                      </>
+                          {!!booking.coPlayerName && (
+                            <Text
+                              style={[styles.coPlayerText, ownBooking && styles.coPlayerOwn]}
+                              numberOfLines={1}
+                            >
+                              + {booking.coPlayerName}
+                            </Text>
+                          )}
+                        </>
+                      )
                     ) : blocked ? (
                       <>
                         <View
@@ -1374,6 +1494,17 @@ if (past && !isAdmin) {
               </View>
             )}
 
+            {tournamentBookingMatch && (
+              <View style={styles.vmModalCard}>
+                <View style={styles.vmModalIcon}><Ionicons name="trophy-outline" size={19} color="#F28B25" /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.vmModalKicker}>VEREINSMEISTERSCHAFT · {tournamentBookingMatch.round_name}</Text>
+                  <Text style={styles.vmModalPlayers}>{tournamentBookingMatch.player1_name} vs. {tournamentBookingMatch.player2_name}</Text>
+                </View>
+              </View>
+            )}
+
+            {!tournamentBookingMatch && (<>
             <Text style={styles.modalLabel}>Mitspieler (optional)</Text>
             <View style={styles.coPlayerRow}>
               <View style={styles.coPlayerInputWrap}>
@@ -1399,6 +1530,7 @@ if (past && !isAdmin) {
                 <Ionicons name="search-outline" size={18} color="#FFFFFF" />
               </TouchableOpacity>
             </View>
+            </>)}
 
             <TouchableOpacity
               style={styles.confirmBookingBtn}
@@ -1516,17 +1648,17 @@ const styles = StyleSheet.create({
   },
   brandWrap: { flexDirection: "row", alignItems: "center", gap: 10, flex: 1 },
   brandIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 14,
+    width: 43,
+    height: 43,
+    borderRadius: 15,
     backgroundColor: "#082A52",
     borderWidth: 1,
-    borderColor: "#173F69",
+    borderColor: "rgba(242,139,37,0.38)",
     alignItems: "center",
     justifyContent: "center",
+    overflow: "hidden",
   },
   brandTitle: { color: "#FFFFFF", fontSize: 21, fontWeight: "900", letterSpacing: -0.4 },
-  brandSubtitle: { color: "#7F93B0", fontSize: 12, marginTop: 1, fontWeight: "600" },
   adminBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -1543,7 +1675,7 @@ const styles = StyleSheet.create({
   dateCard: {
     marginHorizontal: 14,
     marginBottom: 12,
-    minHeight: 64,
+    minHeight: 62,
     paddingHorizontal: 8,
     borderRadius: 18,
     backgroundColor: "#062447",
@@ -1561,9 +1693,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     backgroundColor: "rgba(255,255,255,0.035)",
   },
-  dateCenter: { flex: 1, alignItems: "center", paddingHorizontal: 4 },
-  dateText: { color: "#FFFFFF", fontSize: 16, fontWeight: "900" },
-  dateHint: { color: "#7F93B0", fontSize: 10, fontWeight: "700", marginTop: 3, textTransform: "uppercase", letterSpacing: 0.7 },
+  dateCenter: { flex: 1, alignItems: "center", justifyContent: "center", paddingHorizontal: 6 },
+  dateText: { color: "#FFFFFF", fontSize: 18, fontWeight: "900", letterSpacing: -0.2 },
   todayBtn: {
     marginRight: 6,
     paddingVertical: 7,
@@ -1693,4 +1824,18 @@ const styles = StyleSheet.create({
   userAvatarSmall: { width: 34, height: 34, borderRadius: 11, backgroundColor: "#123B66", alignItems: "center", justifyContent: "center" },
   userAvatarLetter: { color: "#F4A04C", fontSize: 13, fontWeight: "900" },
   coUserName: { flex: 1, color: "#FFFFFF", fontWeight: "800", fontSize: 13 },
+  tournamentBookingBanner: { marginHorizontal: 14, marginBottom: 10, backgroundColor: "#10243A", borderRadius: 16, borderWidth: 1, borderColor: "#B86A24", padding: 11, flexDirection: "row", alignItems: "center", gap: 9 },
+  tournamentBookingIcon: { width: 37, height: 37, borderRadius: 12, backgroundColor: "#F28B25", alignItems: "center", justifyContent: "center" },
+  tournamentBookingKicker: { color: "#F0A052", fontSize: 8.5, fontWeight: "900", letterSpacing: 0.5 },
+  tournamentBookingTitle: { color: "#FFFFFF", fontSize: 12.5, fontWeight: "900", marginTop: 2 },
+  tournamentBookingHint: { color: "#7F96B1", fontSize: 9.5, marginTop: 2 },
+  slotCellTournament: { backgroundColor: "#251F1B", borderColor: "#B96C24" },
+  vmBadge: { width: 25, height: 25, alignItems: "center", justifyContent: "center", backgroundColor: "#F28B25", borderRadius: 9, marginBottom: 5 },
+  vmPlayers: { color: "#FFFFFF", fontSize: 10.5, lineHeight: 13, fontWeight: "900", textAlign: "center" },
+  vmRound: { color: "#F0A052", fontSize: 7.5, fontWeight: "800", marginTop: 3, textTransform: "uppercase" },
+  vmModalCard: { marginTop: 12, backgroundColor: "#261F19", borderRadius: 14, borderWidth: 1, borderColor: "#78502B", padding: 11, flexDirection: "row", alignItems: "center", gap: 9 },
+  vmModalIcon: { width: 36, height: 36, borderRadius: 11, backgroundColor: "#35291C", alignItems: "center", justifyContent: "center" },
+  vmModalKicker: { color: "#B67B43", fontSize: 8.5, fontWeight: "900", letterSpacing: 0.4 },
+  vmModalPlayers: { color: "#FFFFFF", fontSize: 12.5, fontWeight: "900", marginTop: 2 },
+
 });

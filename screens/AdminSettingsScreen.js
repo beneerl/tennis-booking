@@ -414,6 +414,7 @@ function AdminSettingsContent({ userName, navigation }) {
         courtIndex: row.court_index,
         userName: row.user_name || "Unbekannt",
         player2: row.player2 || "",
+        tournamentMatchId: row.tournament_match_id || members.find((m) => m.tournament_match_id)?.tournament_match_id || null,
         start,
         end,
         members,
@@ -571,6 +572,10 @@ function AdminSettingsContent({ userName, navigation }) {
         }
       }
       if (error) throw error;
+      if (group.tournamentMatchId) {
+        const { error: unlinkError } = await supabase.rpc("tournament_unlink_booking", { p_match_id: group.tournamentMatchId });
+        if (unlinkError) console.log("Tournament unlink admin:", unlinkError.message);
+      }
       await loadAdminBookings(bookingDate);
     } catch (e) {
       Alert.alert("Löschen fehlgeschlagen", e?.message || String(e));
@@ -720,6 +725,7 @@ function AdminSettingsContent({ userName, navigation }) {
         {[
           ["blocks", "calendar-outline", "Sperren"],
           ["bookings", "book-outline", "Buchungen"],
+          ["tournament", "trophy-outline", "Turnier"],
           ["users", "people-outline", "Nutzer"],
         ].map(([key, icon, label]) => {
           const active = activeTab === key;
@@ -828,6 +834,32 @@ function AdminSettingsContent({ userName, navigation }) {
         </ScrollView>
       )}
 
+      {activeTab === "tournament" && (
+        <ScrollView style={styles.content} contentContainerStyle={styles.contentPad} showsVerticalScrollIndicator={false}>
+          <View style={styles.heroCard}>
+            <View style={styles.heroIcon}><Ionicons name="trophy-outline" size={22} color="#F28B25" /></View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.heroTitle}>Vereinsmeisterschaft</Text>
+              <Text style={styles.heroText}>Herren, Trostrunde und Damen verwalten, Turnierbäume erstellen und Ergebnisse kontrollieren.</Text>
+            </View>
+          </View>
+
+          <Text style={styles.sectionEyebrow}>TURNIER CENTER</Text>
+          <Text style={styles.sectionTitle}>Meisterschaft verwalten</Text>
+          <Text style={styles.sectionIntro}>Teilnehmer setzen, Turnierbäume erzeugen, Ergebnisse als Admin direkt eintragen und laufende Matches ansehen.</Text>
+
+          <TouchableOpacity style={styles.primaryBtn} onPress={() => navigation.navigate("TournamentAdmin")}>
+            <Ionicons name="git-network-outline" size={19} color="#001738" />
+            <Text style={styles.primaryBtnText}>Turnierverwaltung öffnen</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={[styles.secondaryPrimaryBtn, { marginTop: 10 }]} onPress={() => navigation.navigate("Tournament")}>
+            <Ionicons name="eye-outline" size={18} color="#F28B25" />
+            <Text style={styles.secondaryPrimaryText}>Mitgliederansicht ansehen</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      )}
+
       {activeTab === "bookings" && (
         <ScrollView style={styles.content} contentContainerStyle={styles.contentPad} showsVerticalScrollIndicator={false}>
           <Text style={styles.sectionEyebrow}>VERWALTUNG</Text>
@@ -847,6 +879,9 @@ function AdminSettingsContent({ userName, navigation }) {
                 <View style={{ flex: 1 }}>
                   <Text style={styles.bookingUser}>{group.userName}</Text>
                   {!!group.player2 && <Text style={styles.bookingPartner}>+ {group.player2}</Text>}
+                  {!!group.tournamentMatchId && (
+                    <View style={styles.adminVmPill}><Ionicons name="trophy-outline" size={12} color="#F28B25" /><Text style={styles.adminVmPillText}>Vereinsmeisterschaft</Text></View>
+                  )}
                   <Text style={styles.bookingMeta}>{COURTS[group.courtIndex]} · {group.start}–{group.end}</Text>
                   <Text style={styles.bookingSlots}>{group.members.length * 0.5} Std. · {group.members.length} Slot{group.members.length === 1 ? "" : "s"}</Text>
                 </View>
@@ -907,7 +942,7 @@ const styles = StyleSheet.create({
   tabs: { flexDirection: "row", marginHorizontal: 16, marginTop: 14, backgroundColor: "#061F40", borderRadius: 16, padding: 4 },
   tab: { flex: 1, minHeight: 42, borderRadius: 13, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6 },
   tabActive: { backgroundColor: "#F28B25" },
-  tabText: { color: "#7F96B6", fontWeight: "800", fontSize: 12 },
+  tabText: { color: "#7F96B6", fontWeight: "800", fontSize: 10.5 },
   tabTextActive: { color: "#001738" },
   content: { flex: 1 },
   contentPad: { padding: 16, paddingBottom: 50 },
@@ -1009,4 +1044,7 @@ const styles = StyleSheet.create({
   userActionBtn: { width: 39, height: 39, borderRadius: 12, alignItems: "center", justifyContent: "center", borderWidth: 1 },
   userActionDanger: { backgroundColor: "#351F2A", borderColor: "#613648" },
   userActionApprove: { backgroundColor: "#143630", borderColor: "#286657" },
+  adminVmPill: { alignSelf: "flex-start", marginTop: 5, marginBottom: 2, flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#2C251B", borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
+  adminVmPillText: { color: "#F28B25", fontSize: 8.5, fontWeight: "900" },
+
 });

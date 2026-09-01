@@ -4,6 +4,7 @@ import { Ionicons } from "@expo/vector-icons";
 
 const ITEMS = [
   { route: "Booking", label: "Buchen", icon: "calendar-outline", activeIcon: "calendar" },
+  { route: "Tournament", label: "Turnier", icon: "trophy-outline", activeIcon: "trophy" },
   { route: "Teams", label: "Teams", icon: "people-outline", activeIcon: "people" },
   { route: "LK", label: "LK", icon: "stats-chart-outline", activeIcon: "stats-chart" },
   { route: "Profile", label: "Profil", icon: "person-outline", activeIcon: "person" },
