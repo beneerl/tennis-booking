@@ -428,7 +428,7 @@ function MatchCard({ match, authId, onPress }) {
   const p2External = !!match.player2_name && !match.player2_auth_id;
 
   return (
-    <TouchableOpacity style={[styles.matchCard, mine && styles.matchCardMine]} onPress={onPress} activeOpacity={0.86}>
+    <TouchableOpacity style={[styles.matchCard, completed && styles.matchCardCompleted, mine && styles.matchCardMine]} onPress={onPress} activeOpacity={0.86}>
       <View style={styles.cardAccent} />
       <View style={styles.matchTop}>
         <Text style={styles.matchNo}>MATCH {match.match_index + 1}</Text>
@@ -485,6 +485,9 @@ const styles = StyleSheet.create({
   connectorH: { position: "absolute", height: 1, backgroundColor: "#31577B" },
   connectorV: { position: "absolute", width: 1, backgroundColor: "#31577B" },
   matchCard: { width: CARD_WIDTH, height: CARD_HEIGHT, backgroundColor: "#051E3B", borderRadius: 14, borderWidth: 1, borderColor: "#173F66", paddingHorizontal: 9, paddingTop: 7, paddingBottom: 6, overflow: "hidden" },
+  // Finished matches need a little more vertical room for the score footer.
+  // Keeping the footer inside the card prevents the result from looking detached/clipped.
+  matchCardCompleted: { height: 112, paddingBottom: 0 },
   matchCardMine: { borderColor: "#B56B29", backgroundColor: "#082442" },
   cardAccent: { position: "absolute", left: 0, top: 11, bottom: 11, width: 2, borderRadius: 2, backgroundColor: "#274C70" },
   matchTop: { height: 18, flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingLeft: 3 },
@@ -506,8 +509,8 @@ const styles = StyleSheet.create({
   extPill: { backgroundColor: "#342A1C", borderRadius: 5, paddingHorizontal: 4, paddingVertical: 2 },
   extPillText: { color: "#F4A04A", fontSize: 6, fontWeight: "900" },
   divider: { height: 1, backgroundColor: "#123858", marginLeft: 29 },
-  resultStrip: { minHeight: 20, marginTop: 2, marginHorizontal: 2, borderRadius: 7, backgroundColor: "rgba(242,139,37,0.10)", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 7 },
-  resultStripScore: { color: "#F4A04A", fontSize: 10, lineHeight: 13, fontWeight: "900", letterSpacing: 0.15, maxWidth: 175, textAlign: "center" },
+  resultStrip: { height: 24, marginTop: 4, marginHorizontal: -9, borderTopWidth: 1, borderTopColor: "rgba(242,139,37,0.20)", backgroundColor: "rgba(242,139,37,0.08)", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, paddingHorizontal: 9 },
+  resultStripScore: { color: "#F4A04A", fontSize: 9.8, lineHeight: 13, fontWeight: "900", letterSpacing: 0.12, maxWidth: 178, textAlign: "center" },
   overlay: { flex: 1, backgroundColor: "rgba(0,9,24,0.78)", alignItems: "center", justifyContent: "center", padding: 14 },
   sheet: { width: "100%", maxWidth: 470, maxHeight: "90%", backgroundColor: "#061E3B", borderRadius: 23, borderWidth: 1, borderColor: "#1A4167", padding: 15 },
   handle: { width: 39, height: 4, borderRadius: 99, backgroundColor: "#294B6D", alignSelf: "center", marginBottom: 14 },

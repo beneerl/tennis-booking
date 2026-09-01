@@ -15,7 +15,7 @@ export default function TennisLoader({ style }) {
   const fill = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const timer = setTimeout(() => setVisible(true), 180);
+    const timer = setTimeout(() => setVisible(true), 120);
     return () => clearTimeout(timer);
   }, []);
 
@@ -33,14 +33,15 @@ export default function TennisLoader({ style }) {
       Animated.sequence([
         Animated.timing(fill, {
           toValue: 1,
-          duration: 980,
-          easing: Easing.inOut(Easing.cubic),
+          duration: 360,
+          easing: Easing.out(Easing.cubic),
           useNativeDriver: false,
         }),
-        Animated.delay(140),
+        Animated.delay(420),
         Animated.timing(fill, {
           toValue: 0,
-          duration: 0,
+          duration: 160,
+          easing: Easing.inOut(Easing.quad),
           useNativeDriver: false,
         }),
         Animated.delay(120),
