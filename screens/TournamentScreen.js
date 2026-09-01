@@ -7,6 +7,7 @@ import {
   ScrollView,
   StatusBar,
   ActivityIndicator,
+  useWindowDimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
@@ -18,6 +19,8 @@ import { formatTournamentDate } from "../tournamentUtils";
 const COURTS = ["Platz 1", "Platz 2", "Platz 3"];
 
 export default function TournamentScreen({ navigation }) {
+  const { width } = useWindowDimensions();
+  const compact = width < 390;
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState(null);
   const [authId, setAuthId] = useState(null);
@@ -140,9 +143,11 @@ export default function TournamentScreen({ navigation }) {
       <StatusBar barStyle="light-content" />
       <ScrollView style={styles.scroll} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.headerRow}>
-          <View>
+          <View style={styles.headerCopy}>
             <Text style={styles.eyebrow}>VEREINSMEISTERSCHAFT</Text>
-            <Text style={styles.title}>{activeTournament?.name || "Turniere"}</Text>
+            <Text style={[styles.title, compact && styles.titleCompact]} numberOfLines={2}>
+              {activeTournament?.name || "Turniere"}
+            </Text>
           </View>
           {profile?.is_admin && (
             <TouchableOpacity style={styles.adminBtn} onPress={() => navigation.navigate("TournamentAdmin")}>
@@ -166,9 +171,11 @@ export default function TournamentScreen({ navigation }) {
           <>
             <View style={styles.hero}>
               <View style={styles.heroIcon}><Ionicons name="trophy" size={24} color="#001738" /></View>
-              <View style={{ flex: 1 }}>
+              <View style={styles.heroCopy}>
                 <Text style={styles.heroKicker}>{activeTournament.year}</Text>
-                <Text style={styles.heroTitle}>{activeTournament.name}</Text>
+                <Text style={[styles.heroTitle, compact && styles.heroTitleCompact]} numberOfLines={2}>
+                  {activeTournament.name}
+                </Text>
                 <Text style={styles.heroSub}>{draws.length} Bewerb{draws.length === 1 ? "" : "e"} · live im Verein</Text>
               </View>
               <View style={styles.livePill}><View style={styles.liveDot} /><Text style={styles.liveText}>LIVE</Text></View>
@@ -279,16 +286,20 @@ const styles = StyleSheet.create({
   loadingText: { color: "#9FB0C8", marginTop: 10 },
   scroll: { flex: 1 },
   content: { paddingTop: 52, paddingHorizontal: 16, paddingBottom: 30 },
-  headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 16 },
+  headerRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16, width: "100%" },
+  headerCopy: { flex: 1, minWidth: 0, paddingRight: 12 },
   eyebrow: { color: "#7189A9", fontSize: 10, fontWeight: "900", letterSpacing: 1.3 },
-  title: { color: "#FFFFFF", fontSize: 25, fontWeight: "900", marginTop: 3 },
-  adminBtn: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#08264A", borderWidth: 1, borderColor: "#17406A", alignItems: "center", justifyContent: "center" },
-  hero: { backgroundColor: "#07264A", borderRadius: 22, borderWidth: 1, borderColor: "#1B4A76", padding: 16, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 22 },
-  heroIcon: { width: 48, height: 48, borderRadius: 16, backgroundColor: "#F28B25", alignItems: "center", justifyContent: "center" },
+  title: { color: "#FFFFFF", fontSize: 25, lineHeight: 30, fontWeight: "900", marginTop: 3, flexShrink: 1 },
+  titleCompact: { fontSize: 22, lineHeight: 27 },
+  adminBtn: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#08264A", borderWidth: 1, borderColor: "#17406A", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  hero: { backgroundColor: "#07264A", borderRadius: 22, borderWidth: 1, borderColor: "#1B4A76", padding: 16, paddingRight: 76, flexDirection: "row", alignItems: "center", gap: 12, marginBottom: 22, position: "relative", overflow: "hidden" },
+  heroIcon: { width: 48, height: 48, borderRadius: 16, backgroundColor: "#F28B25", alignItems: "center", justifyContent: "center", flexShrink: 0 },
+  heroCopy: { flex: 1, minWidth: 0 },
   heroKicker: { color: "#F7A24B", fontSize: 10, fontWeight: "900", letterSpacing: 1 },
-  heroTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "900", marginTop: 2 },
+  heroTitle: { color: "#FFFFFF", fontSize: 18, lineHeight: 22, fontWeight: "900", marginTop: 2, flexShrink: 1 },
+  heroTitleCompact: { fontSize: 16.5, lineHeight: 20 },
   heroSub: { color: "#91A8C5", fontSize: 11, marginTop: 3 },
-  livePill: { flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#102F4C", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6 },
+  livePill: { position: "absolute", top: 14, right: 14, flexDirection: "row", alignItems: "center", gap: 5, backgroundColor: "#102F4C", borderRadius: 999, paddingHorizontal: 9, paddingVertical: 6 },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: "#61D6B1" },
   liveText: { color: "#61D6B1", fontSize: 9, fontWeight: "900", letterSpacing: 0.7 },
   sectionTitle: { color: "#FFFFFF", fontSize: 16, fontWeight: "900", marginTop: 8, marginBottom: 10 },
