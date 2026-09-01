@@ -6,12 +6,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
   RefreshControl,
   StatusBar,
 } from "react-native";
 import { supabase } from "../supabaseClient";
 import { Ionicons } from "@expo/vector-icons";
+import TennisLoader from "../components/TennisLoader";
 
 // ✅ Exakter Clubname wie in nuLiga/PDF (wichtig für Filter + Heim/Auswärts)
 // ✅ Clubname je Team (wichtig für TEG-Tab + Heim/Auswärts)
@@ -270,22 +270,7 @@ const ourMatchesRaw = allMatches
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn} activeOpacity={0.85}>
-            <Ionicons name="chevron-back" size={20} color="#F28B25" />
-          </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.headerKicker}>TEAM</Text>
-            <Text style={styles.headerTitle} numberOfLines={1}>{teamTitle}</Text>
-          </View>
-          <View style={styles.refreshBtn}>
-            <Ionicons name="sync-outline" size={18} color="#8198B4" />
-          </View>
-        </View>
-        <View style={styles.center}>
-          <ActivityIndicator color="#F28B25" />
-          <Text style={styles.mutedText}>Lade Teamdaten…</Text>
-        </View>
+        <TennisLoader />
       </View>
     );
   }

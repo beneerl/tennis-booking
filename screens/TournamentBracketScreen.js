@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   StatusBar,
-  ActivityIndicator,
   Modal,
   TextInput,
   Alert,
@@ -21,11 +20,12 @@ import {
   pendingWinnerKeyFor,
   winnerKeyFor,
 } from "../tournamentUtils";
+import TennisLoader from "../components/TennisLoader";
 
 const COURTS = ["Platz 1", "Platz 2", "Platz 3"];
 const CARD_WIDTH = 226;
-const CARD_HEIGHT = 108;
-const BASE_SLOT_HEIGHT = 126;
+const CARD_HEIGHT = 98;
+const BASE_SLOT_HEIGHT = 116;
 const CONNECTOR_GAP = 38;
 
 function message(title, text) {
@@ -57,6 +57,8 @@ export default function TournamentBracketScreen({ navigation, route }) {
   const [score, setScore] = useState("");
   const [winnerId, setWinnerId] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [showInitialLoader, setShowInitialLoader] = useState(false);
+  const loaderShownAt = useRef(0);
 
   const load = async (requestedDraw = drawId || initialDrawId) => {
     setLoading(true);
@@ -122,6 +124,26 @@ export default function TournamentBracketScreen({ navigation, route }) {
   useEffect(() => {
     load(initialDrawId);
   }, [initialDrawId]);
+
+  // Avoid flashing a loading state for very fast requests. If loading lasts long enough,
+  // show the quiet bracket skeleton briefly so the transition feels deliberate.
+  useEffect(() => {
+    let timer;
+
+    if (loading && !matches.length && !showInitialLoader) {
+      timer = setTimeout(() => {
+        loaderShownAt.current = Date.now();
+        setShowInitialLoader(true);
+      }, 160);
+    } else if (!loading && showInitialLoader) {
+      const elapsed = Date.now() - loaderShownAt.current;
+      timer = setTimeout(() => setShowInitialLoader(false), Math.max(0, 520 - elapsed));
+    }
+
+    return () => {
+      if (timer) clearTimeout(timer);
+    };
+  }, [loading, matches.length, showInitialLoader]);
 
   const rounds = useMemo(() => {
     const map = new Map();
@@ -223,8 +245,18 @@ export default function TournamentBracketScreen({ navigation, route }) {
     }
   };
 
+  if (showInitialLoader) {
+    return (
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <TennisLoader />
+      </View>
+    );
+  }
+
+  // For sub-160 ms loads, keep the transition visually quiet instead of flashing a skeleton.
   if (loading && !matches.length) {
-    return <View style={[styles.container, styles.centered]}><ActivityIndicator color="#F28B25" /><Text style={styles.loadingText}>Turnierbaum wird geladen …</Text></View>;
+    return <View style={styles.container}><StatusBar barStyle="light-content" /></View>;
   }
 
   return (
@@ -233,8 +265,7 @@ export default function TournamentBracketScreen({ navigation, route }) {
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}><Ionicons name="chevron-back" size={22} color="#FFFFFF" /></TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={styles.headerKicker}>{tournament?.name || "Vereinsmeisterschaft"}</Text>
-          <Text style={styles.headerTitle}>{currentDraw?.name || "Turnierbaum"}</Text>
+          <Text style={styles.headerTitle} numberOfLines={2}>{tournament?.name || "Vereinsmeisterschaft"}</Text>
         </View>
         <View style={styles.trophyBadge}><Ionicons name="trophy-outline" size={18} color="#F28B25" /></View>
       </View>
@@ -435,8 +466,7 @@ const styles = StyleSheet.create({
   loadingText: { color: "#9FB0C8", marginTop: 10 },
   header: { paddingTop: 48, paddingHorizontal: 15, paddingBottom: 13, flexDirection: "row", alignItems: "center", gap: 11, borderBottomWidth: 1, borderBottomColor: "#123356" },
   backBtn: { width: 41, height: 41, borderRadius: 13, backgroundColor: "#08264A", alignItems: "center", justifyContent: "center" },
-  headerKicker: { color: "#748CAA", fontSize: 9.5, fontWeight: "800" },
-  headerTitle: { color: "#FFFFFF", fontSize: 19, fontWeight: "900", marginTop: 2 },
+  headerTitle: { color: "#FFFFFF", fontSize: 20.5, lineHeight: 25, fontWeight: "900", letterSpacing: -0.3 },
   trophyBadge: { width: 41, height: 41, borderRadius: 13, backgroundColor: "#302719", borderWidth: 1, borderColor: "#6C4B28", alignItems: "center", justifyContent: "center" },
   drawTabsWrap: { borderBottomWidth: 1, borderBottomColor: "#0F3153" },
   drawTabs: { paddingHorizontal: 14, paddingVertical: 10, gap: 8 },
@@ -449,7 +479,7 @@ const styles = StyleSheet.create({
   bracketContent: { paddingLeft: 14, paddingRight: 20, paddingTop: 16, paddingBottom: 20, alignItems: "flex-start" },
   roundSegment: { position: "relative" },
   roundHeader: { height: 52, justifyContent: "center", paddingRight: 8 },
-  roundTitle: { color: "#FFFFFF", fontSize: 19, lineHeight: 23, fontWeight: "900", letterSpacing: -0.35 },
+  roundTitle: { color: "#FFFFFF", fontSize: 21, lineHeight: 26, fontWeight: "900", letterSpacing: -0.45 },
   matchesArea: { position: "relative" },
   matchSlot: { justifyContent: "center" },
   connectorH: { position: "absolute", height: 1, backgroundColor: "#31577B" },

@@ -17,6 +17,7 @@ import { supabase } from "../supabaseClient";
 import { getCurrentUserProfile, normalizeUserStatus } from "../authProfile";
 import { Ionicons } from "@expo/vector-icons";
 import BottomNav from "../components/BottomNav";
+import TennisLoader from "../components/TennisLoader";
 
 
 const STORAGE_PROFILE = "lk_profile_v1";
@@ -328,19 +329,7 @@ export default function LKScreen() {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
-        <View style={styles.header}>
-          <View style={styles.headerIconBox}>
-            <Ionicons name="stats-chart-outline" size={20} color="#F28B25" />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.headerKicker}>TENNIS TACHERTING</Text>
-            <Text style={styles.headerTitle}>LK-Rechner</Text>
-          </View>
-        </View>
-        <View style={styles.loadingWrap}>
-          <Ionicons name="sync-outline" size={24} color="#7187A4" />
-          <Text style={styles.muted}>Lade LK-Daten…</Text>
-        </View>
+        <TennisLoader />
       </View>
     );
   }

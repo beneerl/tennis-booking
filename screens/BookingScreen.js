@@ -18,6 +18,7 @@ import { supabase } from "../supabaseClient";
 import { getCurrentUserProfile, normalizeUserStatus } from "../authProfile";
 import { Ionicons } from "@expo/vector-icons";
 import BottomNav from "../components/BottomNav";
+import TennisLoader from "../components/TennisLoader";
 import { getBlockPresentation, inferBlockType } from "../blockTypes";
 
 const SLOT_DURATION_HOURS = 0.5;
@@ -1186,13 +1187,9 @@ if (past && !isAdmin) {
 
   if (!authChecked || !sessionReady || !userName) {
     return (
-      <View style={[styles.container, styles.centered]}>
+      <View style={styles.container}>
         <StatusBar barStyle="light-content" />
-        <View style={styles.loadingLogo}>
-          <Ionicons name="tennisball-outline" size={31} color="#F28B25" />
-        </View>
-        <ActivityIndicator color="#F28B25" />
-        <Text style={styles.loadingText}>Anmeldung wird geprüft …</Text>
+        <TennisLoader />
       </View>
     );
   }

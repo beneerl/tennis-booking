@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   ScrollView,
   StatusBar,
-  ActivityIndicator,
   TextInput,
   Alert,
   Platform,
@@ -15,6 +14,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { supabase } from "../supabaseClient";
 import { getCurrentUserProfile, normalizeUserStatus } from "../authProfile";
 import { bracketLabelForSize, buildManualBracketRows, makeId } from "../tournamentUtils";
+import TennisLoader from "../components/TennisLoader";
 
 function msg(title, text) {
   if (Platform.OS === "web" && typeof window !== "undefined") window.alert(`${title}\n\n${text}`);
@@ -569,9 +569,9 @@ export default function TournamentAdminScreen({ navigation }) {
 
   if (checking || loading) {
     return (
-      <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator color="#F28B25" />
-        <Text style={styles.loadingText}>Turnierverwaltung wird geladen …</Text>
+      <View style={styles.container}>
+        <StatusBar barStyle="light-content" />
+        <TennisLoader />
       </View>
     );
   }

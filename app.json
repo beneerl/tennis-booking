@@ -24,7 +24,7 @@
     },
     "android": {
       "package": "de.teg.tennistacherting",
-      "versionCode": 1,
+      "versionCode": 7,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#001738"

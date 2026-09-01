@@ -5,13 +5,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   StatusBar,
-  ActivityIndicator,
 } from "react-native";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabaseClient";
 import { getCurrentUserProfile, normalizeUserStatus } from "../authProfile";
 import { Ionicons } from "@expo/vector-icons";
 import BottomNav from "../components/BottomNav";
+import TennisLoader from "../components/TennisLoader";
 
 export default function ProfileScreen({ navigation }) {
   const [user, setUser] = useState(null);
@@ -125,7 +125,7 @@ const handleLogout = async () => {
     return (
       <View style={styles.container}>
         <StatusBar barStyle="light-content" />
-        <ActivityIndicator color="#ffffff" />
+        <TennisLoader />
       </View>
     );
   }
