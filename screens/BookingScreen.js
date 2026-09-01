@@ -18,6 +18,7 @@ import { supabase } from "../supabaseClient";
 import { getCurrentUserProfile, normalizeUserStatus } from "../authProfile";
 import { Ionicons } from "@expo/vector-icons";
 import BottomNav from "../components/BottomNav";
+import { getBlockPresentation, inferBlockType } from "../blockTypes";
 
 const SLOT_DURATION_HOURS = 0.5;
 const SLOT_ROW_HEIGHT = 74; // geschätzte Höhe pro Zeitzeile inkl. Abstand
@@ -112,6 +113,7 @@ const lastFetchWarnRef = useRef(0);
   const [blockedSlots, setBlockedSlots] = useState([]);
   const [weeklyRules, setWeeklyRules] = useState([]);
   const [weeklyExceptions, setWeeklyExceptions] = useState([]);
+  const [specialBlocks, setSpecialBlocks] = useState([]);
 
   const [courtClosures, setCourtClosures] = useState({ 0: false, 1: false, 2: false });
 const [courtClosureReason, setCourtClosureReason] = useState({ 0: "", 1: "", 2: "" });
@@ -407,6 +409,7 @@ const loadBookingsForDate = async (dateKey) => {
       dateKey: row.date_key,
       userName: row.user_name,
       coPlayerName: row.player2 || "",
+      bookingGroupId: row.booking_group_id || null,
     }));
 
     // 4) Pending deletes filtern
@@ -468,7 +471,8 @@ const interval = setInterval(() => {
   loadBookingsForDate(currentDateKey);
   loadWeeklyRules();
   loadWeeklyExceptions(currentDateKey);
-  loadCourtClosures(); // ✅ NEU
+  loadSpecialBlocks(currentDateKey);
+  loadCourtClosures();
 }, 5000);
 
   return () => clearInterval(interval);
@@ -478,7 +482,8 @@ useEffect(() => {
   if (!sessionReady) return;
   loadBookingsForDate(currentDateKey);
   loadWeeklyExceptions(currentDateKey);
-  loadCourtClosures(); // ✅ NEU
+  loadSpecialBlocks(currentDateKey);
+  loadCourtClosures();
 }, [currentDateKey, sessionReady]);
 
 // ✅ Web/PWA Resume-Fix (iOS Home-Screen + Android Web)
@@ -495,6 +500,7 @@ useEffect(() => {
       loadBookingsForDate(currentDateKey);
       loadWeeklyRules();
       loadWeeklyExceptions(currentDateKey);
+      loadSpecialBlocks(currentDateKey);
     }, 600);
   };
 
@@ -538,6 +544,8 @@ useEffect(() => {
         from: row.from_time,
         to: row.to_time,
         reason: row.reason || "",
+        label: row.label || row.reason || "",
+        blockType: inferBlockType(row.reason || row.label, row.block_type),
       }));
 
       setWeeklyRules(mapped);
@@ -575,6 +583,37 @@ useEffect(() => {
     setWeeklyExceptions(mapped);
   } catch (e) {
     console.log("weekly_block_exceptions load exception:", String(e));
+  }
+};
+
+const loadSpecialBlocks = async (dateKey) => {
+  try {
+    const { data, error } = await supabase
+      .from("special_blocks")
+      .select("*")
+      .eq("date_key", dateKey);
+
+    if (error) {
+      // Vor der DB-Migration existiert die Tabelle ggf. noch nicht.
+      // Dann die normale Buchungsansicht nicht kaputt machen.
+      console.log("special_blocks load error:", error.message);
+      setSpecialBlocks([]);
+      return;
+    }
+
+    setSpecialBlocks(
+      (data || []).map((row) => ({
+        id: row.id,
+        courtIndex: row.court_index,
+        from: row.from_time,
+        to: row.to_time,
+        reason: row.reason || "",
+        label: row.label || row.reason || "",
+        blockType: inferBlockType(row.reason || row.label, row.block_type),
+      }))
+    );
+  } catch (e) {
+    console.log("special_blocks load exception:", String(e));
   }
 };
 
@@ -694,11 +733,41 @@ const loadAllUsers = async () => {
   return true;
 };
 
+const getSpecialBlockForSlot = (courtIndex, time) =>
+  specialBlocks.find((block) =>
+    block.courtIndex === courtIndex && time >= block.from && time < block.to
+  );
+
+const getBlockInfoForSlot = (courtIndex, time) => {
+  const special = getSpecialBlockForSlot(courtIndex, time);
+  if (special) {
+    return {
+      source: "special",
+      ...special,
+      presentation: getBlockPresentation(special),
+    };
+  }
+
+  const weekly = getAutoRuleForSlot(courtIndex, time);
+  if (weekly && !isExceptionForSlot(courtIndex, time)) {
+    return {
+      source: "weekly",
+      ...weekly,
+      presentation: getBlockPresentation(weekly),
+    };
+  }
+
+  if (isManuallyBlocked(courtIndex, time)) {
+    const manual = { blockType: "closed", label: "Gesperrt", reason: "Manuell gesperrt" };
+    return { source: "manual", ...manual, presentation: getBlockPresentation(manual) };
+  }
+
+  return null;
+};
+
 const isCourtClosed = (courtIndex) => !!courtClosures?.[courtIndex];
 
-const isBlocked = (courtIndex, time) =>
-  isManuallyBlocked(courtIndex, time) ||
-  isAutomaticallyBlocked(courtIndex, time);
+const isBlocked = (courtIndex, time) => !!getBlockInfoForSlot(courtIndex, time);
 
   const toggleManualBlocked = (courtIndex, time) => {
     const id = `${courtIndex}-${time}-${currentDateKey}`;
@@ -720,34 +789,32 @@ const isBlocked = (courtIndex, time) =>
     return bookings.find((b) => b.id === id);
   };
 
-const deleteBookingFromSupabase = async (courtIndex, time) => {
-  const id = `${courtIndex}-${time}-${currentDateKey}`;
-
-  // ✅ Pending merken, damit Auto-Refresh sie nicht zurückholt
-  pendingDeleteRef.current.add(id);
+const deleteBookingFromSupabase = async (courtIndex, time, bookingGroupId = null, localIds = []) => {
+  const fallbackId = `${courtIndex}-${time}-${currentDateKey}`;
+  const ids = localIds.length ? localIds : [fallbackId];
+  ids.forEach((id) => pendingDeleteRef.current.add(id));
 
   try {
-    const { error } = await supabase
-      .from("bookings123")
-      .delete()
-      .eq("court_index", courtIndex)
-      .eq("time", time)
-      .eq("date_key", currentDateKey);
+    let query = supabase.from("bookings123").delete();
+    if (bookingGroupId) {
+      query = query.eq("booking_group_id", bookingGroupId);
+    } else {
+      query = query
+        .eq("court_index", courtIndex)
+        .eq("time", time)
+        .eq("date_key", currentDateKey);
+    }
+
+    const { error } = await query;
+    ids.forEach((id) => pendingDeleteRef.current.delete(id));
 
     if (error) {
-      // ❌ rollback: pending entfernen + reload
-      pendingDeleteRef.current.delete(id);
       console.log("Supabase delete error:", error.message);
       showMessage("DB-Fehler (Löschen)", error.message);
       await loadBookingsForDate(currentDateKey);
-      return;
     }
-
-    // ✅ Erfolgreich: pending entfernen und einmal hart nachladen (optional aber sauber)
-    pendingDeleteRef.current.delete(id);
-    // await loadBookingsForDate(currentDateKey);
   } catch (e) {
-    pendingDeleteRef.current.delete(id);
+    ids.forEach((id) => pendingDeleteRef.current.delete(id));
     console.log("Supabase delete exception:", e);
     showMessage("DB-Fehler (Exception)", String(e));
     await loadBookingsForDate(currentDateKey);
@@ -772,6 +839,7 @@ const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName)
       return false;
     }
 
+    const bookingGroupId = `bg_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const rows = times.map((t) => ({
       court_index: courtIndex,
       time: t,
@@ -779,9 +847,19 @@ const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName)
       user_name: userName,
       player2: coPlayerName || null,
       user_id: userId,
+      booking_group_id: bookingGroupId,
     }));
 
-    const { error } = await supabase.from("bookings123").insert(rows);
+    let groupPersisted = true;
+    let { error } = await supabase.from("bookings123").insert(rows);
+
+    // Sicherheits-Fallback, falls die DB-Migration noch nicht ausgeführt wurde.
+    if (error && String(error.message || "").toLowerCase().includes("booking_group_id")) {
+      const legacyRows = rows.map(({ booking_group_id, ...rest }) => rest);
+      const retry = await supabase.from("bookings123").insert(legacyRows);
+      error = retry.error;
+      groupPersisted = false;
+    }
 
     if (error) {
       console.log("Supabase insert error:", error.message);
@@ -789,7 +867,7 @@ const insertMultipleBookingsToSupabase = async (courtIndex, times, coPlayerName)
       return false;
     }
 
-    return true;
+    return groupPersisted ? bookingGroupId : true;
   } catch (e) {
     console.log("Supabase insert exception:", e);
     showMessage("Buchung fehlgeschlagen", String(e));
@@ -865,8 +943,13 @@ if (past && !isAdmin) {
 
         if (!ok) return;
 
-        setBookings((prev) => prev.filter((b) => b.id !== id));
-        await deleteBookingFromSupabase(courtIndex, time);
+        const groupBookings = existing.bookingGroupId
+          ? bookings.filter((b) => b.bookingGroupId === existing.bookingGroupId)
+          : [existing];
+        const groupIds = groupBookings.map((b) => b.id);
+        const groupIdSet = new Set(groupIds);
+        setBookings((prev) => prev.filter((b) => !groupIdSet.has(b.id)));
+        await deleteBookingFromSupabase(courtIndex, time, existing.bookingGroupId, groupIds);
       })();
       return;
 
@@ -874,12 +957,11 @@ if (past && !isAdmin) {
 
     // 2) Slot ist gesperrt
     if (isBlocked(courtIndex, time)) {
-      const autoRule = getAutoRuleForSlot(courtIndex, time);
-      const reasonText = autoRule?.reason
-        ? autoRule.reason
-        : isManuallyBlocked(courtIndex, time)
-        ? "Manuell gesperrt"
-        : "Automatisch gesperrt";
+      const blockInfo = getBlockInfoForSlot(courtIndex, time);
+      const reasonText =
+        blockInfo?.presentation?.displayLabel ||
+        blockInfo?.reason ||
+        "Gesperrt";
 
       if (!isAdmin) {
         Alert.alert(
@@ -962,19 +1044,25 @@ if (past && !isAdmin) {
       dateKey: currentDateKey,
       userName,
       coPlayerName: coName,
+      bookingGroupId: null,
     }));
 
     setBookings((prev) => [...prev, ...newBookings]);
-    const saved = await insertMultipleBookingsToSupabase(
+    const savedGroupId = await insertMultipleBookingsToSupabase(
       courtIndex,
       timesToBook,
       coName
     );
 
-    if (!saved) {
+    if (!savedGroupId) {
       const failedIds = new Set(newBookings.map((b) => b.id));
       setBookings((prev) => prev.filter((b) => !failedIds.has(b.id)));
       await loadBookingsForDate(currentDateKey);
+    } else if (typeof savedGroupId === "string") {
+      const savedIds = new Set(newBookings.map((b) => b.id));
+      setBookings((prev) =>
+        prev.map((b) => (savedIds.has(b.id) ? { ...b, bookingGroupId: savedGroupId } : b))
+      );
     }
 
     setBookingModalVisible(false);
@@ -1049,15 +1137,16 @@ if (past && !isAdmin) {
           <Text style={styles.dateHint}>{isTodaySelected ? "Heute" : isPastDaySelected ? "Vergangener Tag" : "Buchungstag"}</Text>
         </View>
 
-        <TouchableOpacity onPress={() => changeDate(1)} style={styles.dateArrow} activeOpacity={0.8}>
-          <Ionicons name="chevron-forward" size={22} color="#FFFFFF" />
-        </TouchableOpacity>
-
         {!isTodaySelected && (
           <TouchableOpacity onPress={goToday} style={styles.todayBtn} activeOpacity={0.85}>
+            <Ionicons name="calendar-outline" size={15} color="#F6A04B" />
             <Text style={styles.todayBtnText}>Heute</Text>
           </TouchableOpacity>
         )}
+
+        <TouchableOpacity onPress={() => changeDate(1)} style={styles.dateArrow} activeOpacity={0.8}>
+          <Ionicons name="chevron-forward" size={22} color="#FFFFFF" />
+        </TouchableOpacity>
       </View>
 
       {/* Court headers */}
@@ -1068,7 +1157,6 @@ if (past && !isAdmin) {
         {COURTS.map((court, index) => (
           <View key={court} style={styles.courtHeaderCell}>
             <Text style={styles.courtHeaderText}>Platz {index + 1}</Text>
-            <Text style={styles.courtHeaderSub}>Court</Text>
           </View>
         ))}
       </View>
@@ -1111,11 +1199,15 @@ if (past && !isAdmin) {
               </View>
 
               {COURTS.map((_, courtIndex) => {
-                const blocked = isBlocked(courtIndex, time);
-                const manualBlocked = isManuallyBlocked(courtIndex, time);
+                const blockInfo = getBlockInfoForSlot(courtIndex, time);
+                const blocked = !!blockInfo;
+                const blockPresentation = blockInfo?.presentation || null;
+                const blockDisplayLabel =
+                  blockInfo?.source === "weekly" && blockPresentation?.key !== "custom"
+                    ? blockPresentation?.shortLabel
+                    : blockPresentation?.displayLabel;
                 const booked = isBooked(courtIndex, time);
                 const booking = getBookingForSlot(courtIndex, time);
-                const autoRule = getAutoRuleForSlot(courtIndex, time);
                 const closed = isCourtClosed(courtIndex);
                 const ownBooking = !!booking && booking.userName === userName;
 
@@ -1126,13 +1218,17 @@ if (past && !isAdmin) {
                       styles.slotCell,
                       closed && styles.slotCellCourtClosed,
                       !closed && blocked && styles.slotCellBlocked,
+                      !closed && blocked && blockPresentation && {
+                        backgroundColor: blockPresentation.surface,
+                        borderColor: blockPresentation.accent,
+                      },
                       booked && !ownBooking && styles.slotCellBookedOther,
                       booked && ownBooking && styles.slotCellBookedOwn,
                     ]}
                     onPress={() => handleSlotPress(courtIndex, time)}
                     onLongPress={() => {
                       if (!isAdmin) return;
-                      if (!isAutomaticallyBlocked(courtIndex, time)) {
+                      if (!getBlockInfoForSlot(courtIndex, time)) {
                         toggleManualBlocked(courtIndex, time);
                       }
                     }}
@@ -1168,10 +1264,33 @@ if (past && !isAdmin) {
                       </>
                     ) : blocked ? (
                       <>
-                        <Ionicons name="ban-outline" size={15} color="#B7C1CF" />
-                        <Text style={styles.blockedLabel} numberOfLines={2}>
-                          {manualBlocked ? "Gesperrt" : autoRule?.reason || "Gesperrt"}
+                        <View
+                          style={[
+                            styles.blockIconBadge,
+                            { backgroundColor: blockPresentation?.surface || "#223247" },
+                          ]}
+                        >
+                          <Ionicons
+                            name={blockPresentation?.icon || "lock-closed-outline"}
+                            size={18}
+                            color={blockPresentation?.accent || "#B7C1CF"}
+                          />
+                        </View>
+                        <Text
+                          style={[
+                            styles.blockedLabel,
+                            { color: blockPresentation?.accent || "#CBD3DC" },
+                          ]}
+                          numberOfLines={2}
+                        >
+                          {blockDisplayLabel || "Gesperrt"}
                         </Text>
+                        {blockInfo?.source === "weekly" && (
+                          <Text style={styles.blockKindLabel}>TRAINING</Text>
+                        )}
+                        {blockInfo?.source === "special" && (
+                          <Text style={styles.blockKindLabel}>TERMIN</Text>
+                        )}
                       </>
                     ) : (
                       <>
@@ -1445,8 +1564,19 @@ const styles = StyleSheet.create({
   dateCenter: { flex: 1, alignItems: "center", paddingHorizontal: 4 },
   dateText: { color: "#FFFFFF", fontSize: 16, fontWeight: "900" },
   dateHint: { color: "#7F93B0", fontSize: 10, fontWeight: "700", marginTop: 3, textTransform: "uppercase", letterSpacing: 0.7 },
-  todayBtn: { marginLeft: 6, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 11, backgroundColor: "#F28B25" },
-  todayBtnText: { color: "#001738", fontSize: 11, fontWeight: "900" },
+  todayBtn: {
+    marginRight: 6,
+    paddingVertical: 7,
+    paddingHorizontal: 9,
+    borderRadius: 11,
+    backgroundColor: "rgba(242,139,37,0.10)",
+    borderWidth: 1,
+    borderColor: "rgba(242,139,37,0.42)",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+  todayBtnText: { color: "#F6A04B", fontSize: 11, fontWeight: "900" },
 
   courtHeaderRow: { flexDirection: "row", alignItems: "stretch", paddingHorizontal: 10, marginBottom: 5 },
   timeHeaderCell: { width: 50, alignItems: "center", justifyContent: "center" },
@@ -1492,7 +1622,9 @@ const styles = StyleSheet.create({
   bookingNameOwn: { color: "#001738" },
   coPlayerText: { color: "#C9DBEC", fontSize: 9, fontWeight: "700", marginTop: 3, textAlign: "center" },
   coPlayerOwn: { color: "rgba(0,23,56,0.75)" },
-  blockedLabel: { color: "#CBD3DC", fontSize: 9.5, lineHeight: 12, fontWeight: "800", marginTop: 4, textAlign: "center" },
+  blockIconBadge: { width: 28, height: 28, borderRadius: 9, alignItems: "center", justifyContent: "center", marginBottom: 3 },
+  blockedLabel: { color: "#CBD3DC", fontSize: 9.5, lineHeight: 12, fontWeight: "900", textAlign: "center" },
+  blockKindLabel: { color: "#7188A6", fontSize: 7.5, fontWeight: "900", letterSpacing: 0.8, marginTop: 2 },
   closedText: { color: "#8C9BAF", fontSize: 9.5, fontWeight: "800", marginTop: 4 },
 
   pastShadePartial: { position: "absolute", left: 0, right: 0, top: 0, zIndex: 5, backgroundColor: "rgba(0,10,25,0.46)" },

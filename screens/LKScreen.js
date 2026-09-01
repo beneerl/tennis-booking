@@ -1,5 +1,5 @@
 // screens/LKScreen.js
-import React, { useEffect, useMemo, useState, useRef } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -9,8 +9,6 @@ import {
   ScrollView,
   Switch,
   StatusBar,
-  RefreshControl,
-  ActivityIndicator,
 } from "react-native";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -128,33 +126,13 @@ const calcImprovementDoubleForOneWinner = ({
 export default function LKScreen() {
   const navigation = useNavigation();
   const [userName, setUserName] = useState("");
-
   const [loading, setLoading] = useState(true);
-
-  // Tabs
-  const [tab, setTab] = useState("calc"); // calc | board
 
   // Profil
   const [currentLK, setCurrentLK] = useState(16.0);
   const [autoUpdate, setAutoUpdate] = useState(true);
   const [useMotivation, setUseMotivation] = useState(false);
-  const [eggVisible, setEggVisible] = useState(false);
-
-  // Komma-Eingabe sauber
   const [currentLKText, setCurrentLKText] = useState("25,0");
-
-  // ✅ Auth UserId (für eindeutigen Upsert)
-  const [userId, setUserId] = useState(null);
-
-  // Rangliste
-  const [optIn, setOptIn] = useState(false);
-  const [leaderboard, setLeaderboard] = useState([]);
-  const [lbLoading, setLbLoading] = useState(false);
-  const [lbRefreshing, setLbRefreshing] = useState(false);
-
-  // Partner Picker (nur für Partner-LK)
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [search, setSearch] = useState("");
 
   // Formular
   const [opponentLK, setOpponentLK] = useState("");
@@ -166,76 +144,12 @@ export default function LKScreen() {
   // Verlauf
   const [history, setHistory] = useState([]);
 
-  const filteredLeaderboard = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return leaderboard;
-    return leaderboard.filter((p) =>
-      String(p.display_name || "").toLowerCase().includes(q)
-    );
-  }, [leaderboard, search]);
-
   const saveProfileLocal = async (next) => {
     await AsyncStorage.setItem(STORAGE_PROFILE, JSON.stringify(next));
   };
+
   const saveHistory = async (next) => {
     await AsyncStorage.setItem(STORAGE_HISTORY, JSON.stringify(next));
-  };
-
-  // ✅ Upsert immer per user_id (nicht display_name), damit Rangliste sofort korrekt ist
-  const upsertProfile = async (lkValue) => {
-    try {
-      if (!userId) return; // nicht eingeloggt / keine session
-
-      const { error } = await supabase
-        .from("lk_profiles")
-        .upsert(
-          {
-            user_id: userId,
-            display_name: userName,
-            lk_current: lkValue,
-            leaderboard_opt_in: !!optIn,
-            updated_at: new Date().toISOString(),
-          },
-          { onConflict: "user_id" }
-        );
-
-      if (error) console.log("lk_profiles upsert error:", error.message);
-    } catch (e) {
-      console.log("lk_profiles upsert exception:", String(e));
-    }
-  };
-
-  const loadLeaderboard = async () => {
-    setLbLoading(true);
-    try {
-      const { data, error } = await supabase
-        .from("lk_profiles")
-        .select("user_id, display_name, lk_current, updated_at")
-        .eq("leaderboard_opt_in", true)
-        .order("lk_current", { ascending: true });
-
-      if (error) console.log("leaderboard error:", error.message);
-      setLeaderboard(data || []);
-    } catch (e) {
-      console.log("leaderboard exception:", String(e));
-    } finally {
-      setLbLoading(false);
-    }
-  };
-
-  // ✅ Zentrale Funktion: erst eigene LK (aus Textfeld!) hochschreiben, dann Rangliste neu laden
-  const syncMyLKThenReload = async () => {
-    const nFromText = toNumber(currentLKText);
-
-    // state optional sauber halten
-    if (nFromText != null) setCurrentLK(nFromText);
-
-    // upsert nur wenn opt-in (sonst ist es ok, nur load zu machen)
-    if (optIn && nFromText != null) {
-      await upsertProfile(nFromText);
-    }
-
-    await loadLeaderboard();
   };
 
   const load = async () => {
@@ -248,8 +162,8 @@ export default function LKScreen() {
         if (typeof p?.currentLK === "number") setCurrentLK(p.currentLK);
         if (typeof p?.autoUpdate === "boolean") setAutoUpdate(p.autoUpdate);
         if (typeof p?.useMotivation === "boolean") setUseMotivation(p.useMotivation);
-        if (typeof p?.optIn === "boolean") setOptIn(p.optIn);
       }
+
       if (hRaw) {
         const h = JSON.parse(hRaw);
         if (Array.isArray(h)) setHistory(h);
@@ -267,17 +181,14 @@ export default function LKScreen() {
           status === "blocked" ||
           (status !== "approved" && !admin)
         ) {
-          setUserId(null);
           setUserName("");
           navigation.reset({ index: 0, routes: [{ name: "Login" }] });
           return;
         }
 
-        setUserId(session.user.id);
         setUserName(profile.name || session.user.email || "Spieler");
       } catch (e) {
         console.log("LK auth/profile load error:", e?.message || e);
-        setUserId(null);
         setUserName("");
         navigation.reset({ index: 0, routes: [{ name: "Login" }] });
         return;
@@ -298,52 +209,23 @@ export default function LKScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading]);
 
-
   useEffect(() => {
     if (loading) return;
-    saveProfileLocal({ currentLK, autoUpdate, useMotivation, optIn });
-  }, [currentLK, autoUpdate, useMotivation, optIn, loading]);
+    saveProfileLocal({ currentLK, autoUpdate, useMotivation });
+  }, [currentLK, autoUpdate, useMotivation, loading]);
 
   useEffect(() => {
-    if (!loading) loadLeaderboard();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
-  
-useEffect(() => {
-  const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
-    setUserId(session?.user?.id || null);
-    if (event === "SIGNED_OUT" || !session?.user?.id) {
-      setUserName("");
-      setTimeout(() => {
-        navigation.reset({ index: 0, routes: [{ name: "Login" }] });
-      }, 0);
-    }
-  });
-  return () => sub?.subscription?.unsubscribe?.();
-}, [navigation]);
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_OUT" || !session?.user?.id) {
+        setUserName("");
+        setTimeout(() => {
+          navigation.reset({ index: 0, routes: [{ name: "Login" }] });
+        }, 0);
+      }
+    });
 
-  // ✅ Opt-in geändert => Profil einmal hochschreiben (mit aktueller LK aus Textfeld)
-  useEffect(() => {
-    if (loading) return;
-    const n = toNumber(currentLKText);
-    if (optIn && n != null) upsertProfile(n);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [optIn, userId]);
-
-  // ✅ Beim Wechsel auf Rangliste automatisch syncen (macht’s „flüssiger“)
-  useEffect(() => {
-    if (loading) return;
-    if (tab === "board") {
-      syncMyLKThenReload();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab, loading]);
-
-  const onRefreshLeaderboard = async () => {
-    setLbRefreshing(true);
-    await syncMyLKThenReload();
-    setLbRefreshing(false);
-  };
+    return () => sub?.subscription?.unsubscribe?.();
+  }, [navigation]);
 
   const onAddMatch = async () => {
     const own = toNumber(currentLK);
@@ -366,7 +248,6 @@ useEffect(() => {
 
     let delta = 0;
     let lkAfter = lkBefore;
-
     const TEAM_BONUS = 1.1;
 
     if (result === "W") {
@@ -394,7 +275,6 @@ useEffect(() => {
       }
 
       delta = round3(Math.max(0, delta));
-      // ✅ Subtraktion: Sieg => LK wird kleiner (besser)
       lkAfter = clampLK(round3(lkBefore - delta));
     } else {
       delta = 0;
@@ -422,10 +302,6 @@ useEffect(() => {
     if (autoUpdate) {
       setCurrentLK(lkAfter);
       setCurrentLKText(fmt(lkAfter));
-
-      // ✅ Profil + Rangliste aktualisieren
-      if (optIn) await upsertProfile(lkAfter);
-      await loadLeaderboard();
     }
 
     setOpponentLK("");
@@ -435,6 +311,7 @@ useEffect(() => {
 
   const onUndo = async () => {
     if (history.length === 0) return;
+
     const [latest, ...rest] = history;
     setHistory(rest);
     await saveHistory(rest);
@@ -442,23 +319,10 @@ useEffect(() => {
     if (autoUpdate && latest?.lkBefore != null) {
       setCurrentLK(latest.lkBefore);
       setCurrentLKText(fmt(latest.lkBefore));
-
-      if (optIn) await upsertProfile(latest.lkBefore);
-      await loadLeaderboard();
     }
   };
 
   const headerLK = useMemo(() => round3(toNumber(currentLK) ?? 0), [currentLK]);
-
-  const TabButton = ({ label, active, onPress }) => (
-    <TouchableOpacity
-      onPress={onPress}
-      style={[styles.tabBtn, active && styles.tabBtnActive]}
-      activeOpacity={0.9}
-    >
-      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
-    </TouchableOpacity>
-  );
 
   if (loading) {
     return (
@@ -468,7 +332,7 @@ useEffect(() => {
           <View style={styles.headerIconSpacer} />
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle}>LK</Text>
-            <Text style={styles.headerSubtitle}>Rechner & Rangliste</Text>
+            <Text style={styles.headerSubtitle}>LK-Rechner</Text>
           </View>
           <View style={styles.headerIconWrap}>
             <Ionicons name="stats-chart-outline" size={20} color="#F28B25" />
@@ -483,310 +347,175 @@ useEffect(() => {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" />
 
-      {/* Header */}
       <View style={styles.headerRow}>
         <View style={styles.headerIconSpacer} />
         <View style={styles.headerCenter}>
           <Text style={styles.headerTitle}>LK</Text>
-          <Text style={styles.headerSubtitle}>Rechner & Rangliste</Text>
+          <Text style={styles.headerSubtitle}>LK-Rechner</Text>
         </View>
         <View style={styles.headerIconWrap}>
           <Ionicons name="stats-chart-outline" size={20} color="#F28B25" />
         </View>
       </View>
 
-      {/* Tabs */}
-      <View style={styles.tabsRow}>
-        <TabButton label="Rechner" active={tab === "calc"} onPress={() => setTab("calc")} />
-        <TabButton label="Rangliste" active={tab === "board"} onPress={() => setTab("board")} />
-      </View>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ paddingBottom: 24, paddingHorizontal: 14 }}
+      >
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Aktuelle LK</Text>
+          <TextInput
+            value={currentLKText}
+            onChangeText={(t) => {
+              const cleaned = String(t).replace(".", ",");
+              setCurrentLKText(cleaned);
+              const n = toNumber(cleaned);
+              if (n != null) setCurrentLK(n);
+            }}
+            keyboardType="numbers-and-punctuation"
+            style={styles.input}
+            placeholder="z.B. 16,3"
+            placeholderTextColor="#7f93b0"
+          />
+          <Text style={styles.bigLK}>{fmt(headerLK)}</Text>
 
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24, paddingHorizontal: 14 }}>
-        {tab === "calc" && (
-          <>
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Aktuelle LK</Text>
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>LK nach Eintrag aktualisieren</Text>
+            <Switch value={autoUpdate} onValueChange={setAutoUpdate} />
+          </View>
+
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Motivationsaufschlag berücksichtigen</Text>
+            <Switch value={useMotivation} onValueChange={setUseMotivation} />
+          </View>
+
+          <Text style={styles.note}>
+            Motivation: +0,025 je voller Woche seit dem letzten Eintrag (bis LK 25).
+          </Text>
+          <Text style={styles.note}>Dein Name: {userName}</Text>
+        </View>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Match eintragen</Text>
+
+          <View style={styles.segRow}>
+            <TouchableOpacity
+              style={[styles.seg, type === "single" && styles.segActive]}
+              onPress={() => setType("single")}
+              activeOpacity={0.9}
+            >
+              <Text style={[styles.segText, type === "single" && styles.segTextActive]}>
+                Einzel
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.seg, type === "double" && styles.segActive]}
+              onPress={() => setType("double")}
+              activeOpacity={0.9}
+            >
+              <Text style={[styles.segText, type === "double" && styles.segTextActive]}>
+                Doppel
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.segRow}>
+            <TouchableOpacity
+              style={[styles.seg, result === "W" && styles.segActive]}
+              onPress={() => setResult("W")}
+              activeOpacity={0.9}
+            >
+              <Text style={[styles.segText, result === "W" && styles.segTextActive]}>
+                Sieg
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.seg, result === "L" && styles.segActive]}
+              onPress={() => setResult("L")}
+              activeOpacity={0.9}
+            >
+              <Text style={[styles.segText, result === "L" && styles.segTextActive]}>
+                Niederlage
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {type === "double" ? (
+            <>
+              <Text style={styles.label}>Partner-LK</Text>
               <TextInput
-                value={currentLKText}
-                onChangeText={(t) => {
-                  const cleaned = String(t).replace(".", ",");
-                  setCurrentLKText(cleaned);
-                  const n = toNumber(cleaned);
-                  if (n != null) setCurrentLK(n);
-                }}
+                value={partnerLK}
+                onChangeText={setPartnerLK}
                 keyboardType="numbers-and-punctuation"
                 style={styles.input}
-                placeholder="z.B. 16,3"
+                placeholder="z.B. 18,5"
                 placeholderTextColor="#7f93b0"
               />
-              <Text style={styles.bigLK}>{fmt(headerLK)}</Text>
 
-              <View style={styles.row}>
-                <Text style={styles.rowLabel}>LK nach Eintrag aktualisieren</Text>
-                <Switch value={autoUpdate} onValueChange={setAutoUpdate} />
-              </View>
+              <Text style={styles.label}>Gegner-LK 1</Text>
+              <TextInput
+                value={opponentLK}
+                onChangeText={setOpponentLK}
+                keyboardType="numbers-and-punctuation"
+                style={styles.input}
+                placeholder="z.B. 14,8"
+                placeholderTextColor="#7f93b0"
+              />
 
-              <View style={styles.row}>
-                <Text style={styles.rowLabel}>Motivationsaufschlag berücksichtigen</Text>
-                <Switch value={useMotivation} onValueChange={setUseMotivation} />
-              </View>
+              <Text style={styles.label}>Gegner-LK 2</Text>
+              <TextInput
+                value={opponentPartnerLK}
+                onChangeText={setOpponentPartnerLK}
+                keyboardType="numbers-and-punctuation"
+                style={styles.input}
+                placeholder="z.B. 16,2"
+                placeholderTextColor="#7f93b0"
+              />
+            </>
+          ) : (
+            <>
+              <Text style={styles.label}>Gegner-LK</Text>
+              <TextInput
+                value={opponentLK}
+                onChangeText={setOpponentLK}
+                keyboardType="numbers-and-punctuation"
+                style={styles.input}
+                placeholder="z.B. 14,8"
+                placeholderTextColor="#7f93b0"
+              />
+            </>
+          )}
 
-              <View style={styles.row}>
-                <Text style={styles.rowLabel}>In Rangliste anzeigen</Text>
-                <Switch value={optIn} onValueChange={setOptIn} />
-              </View>
+          <TouchableOpacity style={styles.primaryBtn} onPress={onAddMatch} activeOpacity={0.9}>
+            <Text style={styles.primaryText}>Eintrag speichern</Text>
+          </TouchableOpacity>
 
-              <Text style={styles.note}>
-                Motivation: +0,025 je voller Woche seit dem letzten Eintrag (bis LK 25).
-              </Text>
-              <Text style={styles.note}>Dein Name: {userName}</Text>
-            </View>
-
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Match eintragen</Text>
-
-              <View style={styles.segRow}>
-                <TouchableOpacity
-                  style={[styles.seg, type === "single" && styles.segActive]}
-                  onPress={() => setType("single")}
-                  activeOpacity={0.9}
-                >
-                  <Text style={[styles.segText, type === "single" && styles.segTextActive]}>
-                    Einzel
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.seg, type === "double" && styles.segActive]}
-                  onPress={() => setType("double")}
-                  activeOpacity={0.9}
-                >
-                  <Text style={[styles.segText, type === "double" && styles.segTextActive]}>
-                    Doppel
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.segRow}>
-                <TouchableOpacity
-                  style={[styles.seg, result === "W" && styles.segActive]}
-                  onPress={() => setResult("W")}
-                  activeOpacity={0.9}
-                >
-                  <Text style={[styles.segText, result === "W" && styles.segTextActive]}>
-                    Sieg
-                  </Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.seg, result === "L" && styles.segActive]}
-                  onPress={() => setResult("L")}
-                  activeOpacity={0.9}
-                >
-                  <Text style={[styles.segText, result === "L" && styles.segTextActive]}>
-                    Niederlage
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {type === "double" ? (
-                <>
-                  <Text style={styles.label}>Partner-LK</Text>
-                  <TextInput
-                    value={partnerLK}
-                    onChangeText={setPartnerLK}
-                    keyboardType="numbers-and-punctuation"
-                    style={styles.input}
-                    placeholder="z.B. 18,5"
-                    placeholderTextColor="#7f93b0"
-                  />
-
-                  {/* ✅ Nur hier: Partner aus Rangliste wählen */}
-                  <TouchableOpacity
-                    style={styles.pickBtn}
-                    onPress={async () => {
-                      setSearch("");
-                      setPickerOpen(true);
-                      // ✅ sicherstellen, dass Rangliste frisch ist (inkl. eigener LK)
-                      await syncMyLKThenReload();
-                    }}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={styles.pickBtnText}>Partner aus Rangliste wählen</Text>
-                  </TouchableOpacity>
-
-                  <Text style={styles.label}>Gegner-LK 1</Text>
-                  <TextInput
-                    value={opponentLK}
-                    onChangeText={setOpponentLK}
-                    keyboardType="numbers-and-punctuation"
-                    style={styles.input}
-                    placeholder="z.B. 14,8"
-                    placeholderTextColor="#7f93b0"
-                  />
-
-                  <Text style={styles.label}>Gegner-LK 2</Text>
-                  <TextInput
-                    value={opponentPartnerLK}
-                    onChangeText={setOpponentPartnerLK}
-                    keyboardType="numbers-and-punctuation"
-                    style={styles.input}
-                    placeholder="z.B. 16,2"
-                    placeholderTextColor="#7f93b0"
-                  />
-                </>
-              ) : (
-                <>
-                  <Text style={styles.label}>Gegner-LK</Text>
-                  <TextInput
-                    value={opponentLK}
-                    onChangeText={setOpponentLK}
-                    keyboardType="numbers-and-punctuation"
-                    style={styles.input}
-                    placeholder="z.B. 14,8"
-                    placeholderTextColor="#7f93b0"
-                  />
-                </>
-              )}
-
-              <TouchableOpacity style={styles.primaryBtn} onPress={onAddMatch} activeOpacity={0.9}>
-                <Text style={styles.primaryText}>Eintrag speichern</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.secondaryBtn} onPress={onUndo} activeOpacity={0.9}>
-                <Text style={styles.secondaryText}>Letzten Eintrag rückgängig</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>Verlauf</Text>
-
-              {history.length === 0 ? (
-                <Text style={styles.muted}>Noch keine Einträge.</Text>
-              ) : (
-                history.map((h) => (
-                  <View key={h.id} style={styles.historyRow}>
-                    <Text style={styles.hMain}>
-                      {h.result === "W" ? "✅ Sieg" : "❌ Niederlage"} ·{" "}
-                      {h.type === "single" ? "Einzel" : "Doppel"} · Gegner {fmt(h.opponentLK)}
-                    </Text>
-                    <Text style={styles.hSub}>
-                      LK {fmt(h.lkBefore)} → {fmt(h.lkAfter)} · Δ {fmt(h.delta)}
-                      {h.motivationApplied ? ` · Motivation +${fmt(h.motivationApplied)}` : ""}
-                    </Text>
-                  </View>
-                ))
-              )}
-            </View>
-          </>
-        )}
-
-        {tab === "board" && (
-          <View style={styles.card}>
-            <View style={styles.boardHeaderRow}>
-              <Text style={styles.cardTitle}>Rangliste</Text>
-
-              <TouchableOpacity
-                onPress={syncMyLKThenReload}
-                style={styles.refreshBtn}
-                activeOpacity={0.9}
-              >
-                <Text style={styles.refreshText}>↻</Text>
-              </TouchableOpacity>
-            </View>
-
-            {lbLoading ? (
-              <View style={{ paddingVertical: 12 }}>
-                <ActivityIndicator color="#ffffff" />
-                <Text style={styles.muted}>Lade Rangliste…</Text>
-              </View>
-            ) : (
-              <ScrollView
-                style={{ maxHeight: 520 }}
-                refreshControl={
-                  <RefreshControl
-                    refreshing={lbRefreshing}
-                    onRefresh={onRefreshLeaderboard}
-                    tintColor="#fff"
-                  />
-                }
-              >
-                {leaderboard.length === 0 ? (
-                  <Text style={styles.muted}>
-                    Noch keine Einträge. Aktiviere „In Rangliste anzeigen“ und speichere einen Eintrag.
-                  </Text>
-                ) : (
-                  leaderboard.map((p, idx) => (
-                    <View key={`${p.user_id || p.display_name}-${idx}`} style={styles.boardRow}>
-                      <Text style={styles.boardRank}>#{idx + 1}</Text>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.boardName} numberOfLines={1}>
-                          {p.display_name}
-                        </Text>
-                        <Text style={styles.boardMeta}>
-                          zuletzt:{" "}
-                          {p.updated_at
-                            ? new Date(p.updated_at).toLocaleDateString("de-DE")
-                            : "—"}
-                        </Text>
-                      </View>
-                      <Text style={styles.boardLK}>{fmt(round3(p.lk_current))}</Text>
-                    </View>
-                  ))
-                )}
-              </ScrollView>
-            )}
-          </View>
-        )}
-      </ScrollView>
-
-      {/* ✅ Modal: Partner aus Rangliste wählen */}
-      {pickerOpen && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Partner auswählen</Text>
-              <TouchableOpacity
-                onPress={() => setPickerOpen(false)}
-                style={styles.modalClose}
-                activeOpacity={0.9}
-              >
-                <Text style={styles.modalCloseText}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TextInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Suchen…"
-              placeholderTextColor="#7f93b0"
-              style={styles.searchInput}
-            />
-
-            <ScrollView style={{ maxHeight: 360 }}>
-              {filteredLeaderboard.length === 0 ? (
-                <Text style={styles.muted}>Keine Treffer.</Text>
-              ) : (
-                filteredLeaderboard.map((p, idx) => (
-                  <TouchableOpacity
-                    key={`${p.user_id || p.display_name}-${idx}`}
-                    style={styles.pickerRow}
-                    onPress={() => {
-                      // ✅ setzt Partner-LK (nur Partner!)
-                      setPartnerLK(fmt(round3(p.lk_current)));
-                      setPickerOpen(false);
-                    }}
-                    activeOpacity={0.9}
-                  >
-                    <Text style={styles.pickerName} numberOfLines={1}>
-                      {p.display_name}
-                    </Text>
-                    <Text style={styles.pickerLK}>{fmt(round3(p.lk_current))}</Text>
-                  </TouchableOpacity>
-                ))
-              )}
-            </ScrollView>
-          </View>
+          <TouchableOpacity style={styles.secondaryBtn} onPress={onUndo} activeOpacity={0.9}>
+            <Text style={styles.secondaryText}>Letzten Eintrag rückgängig</Text>
+          </TouchableOpacity>
         </View>
-      )}
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Verlauf</Text>
+
+          {history.length === 0 ? (
+            <Text style={styles.muted}>Noch keine Einträge.</Text>
+          ) : (
+            history.map((h) => (
+              <View key={h.id} style={styles.historyRow}>
+                <Text style={styles.hMain}>
+                  {h.result === "W" ? "✅ Sieg" : "❌ Niederlage"} ·{" "}
+                  {h.type === "single" ? "Einzel" : "Doppel"} · Gegner {fmt(h.opponentLK)}
+                </Text>
+                <Text style={styles.hSub}>
+                  LK {fmt(h.lkBefore)} → {fmt(h.lkAfter)} · Δ {fmt(h.delta)}
+                  {h.motivationApplied ? ` · Motivation +${fmt(h.motivationApplied)}` : ""}
+                </Text>
+              </View>
+            ))
+          )}
+        </View>
+      </ScrollView>
 
       <BottomNav navigation={navigation} active="LK" />
     </View>
