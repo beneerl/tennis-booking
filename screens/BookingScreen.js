@@ -374,6 +374,27 @@ const loadBookingsForDate = async (dateKey) => {
 
     if (error) {
       console.log("Supabase load error:", error.message);
+
+      // Kurze Netzwerkunterbrechungen sind besonders bei iOS/PWA nach
+      // Standby, App-Wechsel oder WLAN/Mobilfunk-Wechsel normal.
+      // In diesem Fall alte Buchungen stehen lassen und still erneut laden.
+      if (isNetworkFetchError(error)) {
+        setIsRetryingBookings(true);
+
+        if (!retryBookingsRef.current) {
+          retryBookingsRef.current = true;
+          setTimeout(async () => {
+            try {
+              await loadBookingsForDate(dateKey);
+            } finally {
+              retryBookingsRef.current = false;
+            }
+          }, 1200);
+        }
+        return;
+      }
+
+      // Echte Datenbank-/Berechtigungsfehler weiterhin sichtbar machen.
       showMessage("DB-Fehler (Buchungen laden)", error.message);
       return;
     }
@@ -391,6 +412,7 @@ const loadBookingsForDate = async (dateKey) => {
     // 4) Pending deletes filtern
     const filtered = mapped.filter((b) => !pendingDeleteRef.current.has(b.id));
     setBookings(filtered);
+    setIsRetryingBookings(false);
 
     console.log(`Bookings loaded for ${dateKey}:`, filtered.length);
   } catch (e) {
@@ -405,6 +427,7 @@ const loadBookingsForDate = async (dateKey) => {
 
     if (isNet) {
       console.log("Transient fetch error -> retry once...", msg);
+      setIsRetryingBookings(true);
 
       if (retryBookingsRef.current) return;
       retryBookingsRef.current = true;
@@ -431,6 +454,17 @@ useEffect(() => {
   if (!sessionReady) return;
 
 const interval = setInterval(() => {
+  // Im Hintergrund bzw. ohne Netz keine Requests losschicken.
+  // Beim Zurückkehren/Online-Gehen übernimmt der Resume-Handler unten.
+  if (Platform.OS === "web") {
+    if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+      return;
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      return;
+    }
+  }
+
   loadBookingsForDate(currentDateKey);
   loadWeeklyRules();
   loadWeeklyExceptions(currentDateKey);
@@ -486,6 +520,13 @@ useEffect(() => {
 
       if (error) {
         console.log("Supabase weekly_blocks load error:", error.message);
+
+        // Gleiches Verhalten wie bei den Buchungen: kurze Offline-/Wake-up-
+        // Fehler nicht als störendes Popup anzeigen.
+        if (isNetworkFetchError(error)) {
+          return;
+        }
+
         Alert.alert("DB-Fehler (weekly_blocks)", error.message);
         return;
       }
