@@ -1,5 +1,6 @@
 import React from "react";
 import { View, Text, TouchableOpacity, StyleSheet, Platform } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 
 const ITEMS = [
@@ -12,41 +13,49 @@ const ITEMS = [
 
 export default function BottomNav({ navigation, active }) {
   return (
-    <View style={styles.wrap}>
-      {ITEMS.map((item) => {
-        const selected = active === item.route;
-        return (
-          <TouchableOpacity
-            key={item.route}
-            style={styles.item}
-            onPress={() => {
-              if (!selected) navigation.navigate(item.route);
-            }}
-            activeOpacity={0.82}
-          >
-            <View style={[styles.iconWrap, selected && styles.iconWrapActive]}>
-              <Ionicons
-                name={selected ? item.activeIcon : item.icon}
-                size={20}
-                color={selected ? "#F28B25" : "#7187A4"}
-              />
-            </View>
-            <Text style={[styles.label, selected && styles.labelActive]}>{item.label}</Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
+    <SafeAreaView
+      edges={Platform.OS === "web" ? [] : ["bottom"]}
+      style={styles.safeArea}
+    >
+      <View style={styles.wrap}>
+        {ITEMS.map((item) => {
+          const selected = active === item.route;
+          return (
+            <TouchableOpacity
+              key={item.route}
+              style={styles.item}
+              onPress={() => {
+                if (!selected) navigation.navigate(item.route);
+              }}
+              activeOpacity={0.82}
+            >
+              <View style={[styles.iconWrap, selected && styles.iconWrapActive]}>
+                <Ionicons
+                  name={selected ? item.activeIcon : item.icon}
+                  size={20}
+                  color={selected ? "#F28B25" : "#7187A4"}
+                />
+              </View>
+              <Text style={[styles.label, selected && styles.labelActive]}>{item.label}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    backgroundColor: "#061C37",
+  },
   wrap: {
     flexDirection: "row",
     backgroundColor: "#061C37",
     borderTopWidth: 1,
     borderTopColor: "#153A60",
     paddingTop: 7,
-    paddingBottom: Platform.OS === "ios" ? 18 : 9,
+    paddingBottom: 8,
     paddingHorizontal: 6,
   },
   item: { flex: 1, alignItems: "center", justifyContent: "center", minHeight: 50 },
