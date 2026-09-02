@@ -18,6 +18,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { supabase } from "../supabaseClient";
 import { getCurrentUserProfile, normalizeUserStatus } from "../authProfile";
 import { Ionicons } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import BottomNav from "../components/BottomNav";
 import TennisLoader from "../components/TennisLoader";
 import { getBlockPresentation, inferBlockType } from "../blockTypes";
@@ -107,6 +108,7 @@ function isNetworkFetchError(err) {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export default function BookingScreen({ navigation, route }) {
+  const insets = useSafeAreaInsets();
   // WICHTIG: Identitaet und Admin-Rolle kommen nie aus route.params/URL.
   const [userName, setUserName] = useState("");
   const [isAdmin, setIsAdmin] = useState(false);
@@ -1387,7 +1389,7 @@ if (past && !isAdmin) {
                     ) : booking ? (
                       tournamentBooking ? (
                         <>
-                          <View style={styles.vmBadge}><Ionicons name="trophy" size={14} color="#001738" /></View>
+                          <View style={styles.vmBadge}><Ionicons name="trophy" size={12} color="#001738" /></View>
                           <Text style={styles.vmPlayers} numberOfLines={2}>{booking.userName} vs. {booking.coPlayerName || tournamentMeta?.player2_name || "Gegner"}</Text>
                           <Text style={styles.vmRound} numberOfLines={1}>{tournamentMeta?.round_name || "Vereinsmeisterschaft"}</Text>
                         </>
@@ -1460,9 +1462,8 @@ if (past && !isAdmin) {
 
       <BottomNav navigation={navigation} active="Booking" />
 
-      {/* Booking confirmation sheet: echtes Modal statt absolutem Overlay.
-          Das verhindert auf kleinen/älteren Android-Browsern den Zustand
-          „schwarzer Hintergrund, Sheet außerhalb des sichtbaren Viewports“. */}
+      {/* Zentriertes, Safe-Area-festes Buchungsmodal.
+          So kollidieren Abbrechen/Bestätigen auf Android nicht mit der Systemnavigation. */}
       <Modal
         visible={bookingModalVisible && !!pendingSlot}
         transparent
@@ -1471,7 +1472,13 @@ if (past && !isAdmin) {
         onRequestClose={handleCancelBookingRange}
       >
         <KeyboardAvoidingView
-          style={styles.modalOverlay}
+          style={[
+            styles.modalOverlay,
+            {
+              paddingTop: Math.max(22, insets.top + 12),
+              paddingBottom: Math.max(28, insets.bottom + 18),
+            },
+          ]}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           {pendingSlot && (
@@ -1483,15 +1490,12 @@ if (past && !isAdmin) {
                 keyboardShouldPersistTaps="handled"
                 bounces={false}
               >
-                <View style={styles.sheetHandle} />
-
                 <View style={styles.modalTitleRow}>
                   <View style={styles.modalIconWrap}>
                     <Ionicons name="calendar-outline" size={22} color="#F28B25" />
                   </View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={styles.modalTitle}>Buchung bestätigen</Text>
-                    <Text style={styles.modalSubline}>Prüfe kurz die Details deiner Reservierung.</Text>
                   </View>
                 </View>
 
@@ -1603,11 +1607,19 @@ if (past && !isAdmin) {
           visible={coPickerOpen}
           transparent
           animationType="fade"
+          statusBarTranslucent={Platform.OS === "android"}
           onRequestClose={closeCoPlayerPicker}
         >
-          <View style={styles.modalOverlay}>
+          <View
+            style={[
+              styles.modalOverlay,
+              {
+                paddingTop: Math.max(22, insets.top + 12),
+                paddingBottom: Math.max(28, insets.bottom + 18),
+              },
+            ]}
+          >
             <View style={styles.modalBox}>
-              <View style={styles.sheetHandle} />
               <View style={styles.modalTitleRow}>
                 <View style={styles.modalIconWrap}>
                   <Ionicons name="people-outline" size={22} color="#F28B25" />
@@ -1817,33 +1829,31 @@ const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0, 8, 20, 0.72)",
-    justifyContent: "flex-end",
+    justifyContent: "center",
     alignItems: "center",
-    paddingTop: 18,
-    paddingBottom: Platform.OS === "web" ? 12 : 18,
+    paddingHorizontal: 12,
   },
   modalBox: {
     backgroundColor: "#071F3D",
-    width: "96%",
-    maxWidth: 520,
-    maxHeight: "88%",
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: Platform.OS === "ios" ? 30 : 22,
-    borderRadius: 24,
+    width: "94%",
+    maxWidth: 500,
+    maxHeight: "82%",
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 16,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: "#19456F",
     overflow: "hidden",
   },
   bookingModalScroll: { width: "100%" },
   bookingModalContent: { paddingBottom: 2 },
-  sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: "#33516F", alignSelf: "center", marginBottom: 14 },
-  modalTitleRow: { flexDirection: "row", gap: 11, alignItems: "center", marginBottom: 14 },
-  modalIconWrap: { width: 42, height: 42, borderRadius: 14, backgroundColor: "rgba(242,139,37,0.10)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(242,139,37,0.25)" },
-  modalTitle: { color: "#FFFFFF", fontSize: 20, fontWeight: "900", letterSpacing: -0.3 },
+  modalTitleRow: { flexDirection: "row", gap: 10, alignItems: "center", marginBottom: 12 },
+  modalIconWrap: { width: 38, height: 38, borderRadius: 12, backgroundColor: "rgba(242,139,37,0.10)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(242,139,37,0.25)" },
+  modalTitle: { color: "#FFFFFF", fontSize: 18, fontWeight: "900", letterSpacing: -0.3 },
   modalSubline: { color: "#8195AF", fontSize: 11, marginTop: 2 },
-  bookingSummaryCard: { backgroundColor: "#0A294D", borderWidth: 1, borderColor: "#16436C", borderRadius: 16, paddingHorizontal: 13, marginBottom: 15 },
-  summaryRow: { minHeight: 39, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  bookingSummaryCard: { backgroundColor: "#0A294D", borderWidth: 1, borderColor: "#16436C", borderRadius: 15, paddingHorizontal: 13, marginBottom: 13 },
+  summaryRow: { minHeight: 36, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   summaryDivider: { height: 1, backgroundColor: "rgba(255,255,255,0.055)" },
   summaryLabel: { color: "#8195AF", fontSize: 11, fontWeight: "700" },
   summaryValue: { color: "#FFFFFF", fontSize: 12, fontWeight: "900", flex: 1, textAlign: "right" },
@@ -1861,9 +1871,9 @@ const styles = StyleSheet.create({
   coPlayerInputWrap: { flex: 1, minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#0A294D", borderRadius: 13, paddingHorizontal: 11, borderWidth: 1, borderColor: "#16436C" },
   coPlayerInput: { flex: 1, color: "#FFFFFF", fontSize: 13, paddingVertical: 10 },
   coPickBtn: { width: 44, height: 44, borderRadius: 13, backgroundColor: "#123B66", borderWidth: 1, borderColor: "#1B4B77", alignItems: "center", justifyContent: "center" },
-  confirmBookingBtn: { minHeight: 48, borderRadius: 14, backgroundColor: "#F28B25", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
+  confirmBookingBtn: { minHeight: 46, borderRadius: 14, backgroundColor: "#F28B25", flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8 },
   confirmBookingText: { color: "#001738", fontSize: 14, fontWeight: "900" },
-  cancelBookingBtn: { minHeight: 38, alignItems: "center", justifyContent: "center", marginTop: 4 },
+  cancelBookingBtn: { minHeight: 34, alignItems: "center", justifyContent: "center", marginTop: 3 },
   cancelBookingText: { color: "#91A4BC", fontSize: 12, fontWeight: "800" },
   searchWrap: { minHeight: 46, flexDirection: "row", alignItems: "center", gap: 8, backgroundColor: "#0A294D", borderRadius: 14, paddingHorizontal: 12, borderWidth: 1, borderColor: "#16436C", marginBottom: 10 },
   coSearchInput: { flex: 1, color: "#FFFFFF", fontSize: 13, paddingVertical: 10 },
@@ -1879,7 +1889,7 @@ const styles = StyleSheet.create({
   tournamentBookingTitle: { color: "#FFFFFF", fontSize: 12.5, fontWeight: "900", marginTop: 2 },
   tournamentBookingHint: { color: "#7F96B1", fontSize: 9.5, marginTop: 2 },
   slotCellTournament: { backgroundColor: "#251F1B", borderColor: "#B96C24" },
-  vmBadge: { width: 25, height: 25, alignItems: "center", justifyContent: "center", backgroundColor: "#F28B25", borderRadius: 9, marginBottom: 5 },
+  vmBadge: { width: 22, height: 22, alignItems: "center", justifyContent: "center", backgroundColor: "#F28B25", borderRadius: 8, marginBottom: 3 },
   vmPlayers: { color: "#FFFFFF", fontSize: 10.5, lineHeight: 13, fontWeight: "900", textAlign: "center" },
   vmRound: { color: "#F0A052", fontSize: 7.5, fontWeight: "800", marginTop: 3, textTransform: "uppercase" },
   vmModalCard: { marginTop: 12, backgroundColor: "#261F19", borderRadius: 14, borderWidth: 1, borderColor: "#78502B", padding: 11, flexDirection: "row", alignItems: "center", gap: 9 },
