@@ -11,6 +11,7 @@ import {
   Platform,
   ActivityIndicator,
   Modal,
+  KeyboardAvoidingView,
 } from "react-native";
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -177,6 +178,16 @@ selectedDay.setHours(0, 0, 0, 0);
 
 const isPastDaySelected = selectedDay.getTime() < today.getTime();
 const isFutureDaySelected = selectedDay.getTime() > today.getTime();
+
+// Beim Wechsel des Buchungstags niemals ein altes Overlay stehen lassen.
+// Ältere Android-WebViews berechnen die sichtbare Viewport-Höhe teils verzögert neu.
+useEffect(() => {
+  setBookingModalVisible(false);
+  setCoPickerOpen(false);
+  setPendingSlot(null);
+  setEndOptions([]);
+  setSelectedEndTime(null);
+}, [currentDateKey]);
 
 const now = new Date(nowTick);
 const nowMinutes = now.getHours() * 60 + now.getMinutes();
@@ -1182,6 +1193,30 @@ if (past && !isAdmin) {
     setCoPlayerNameInput("");
   };
 
+  // Native iOS/ältere Android-WebViews mögen keine zwei gleichzeitig offenen Modals.
+  // Darum wird das Buchungs-Sheet kurz geschlossen, bevor die Spielersuche öffnet.
+  const openCoPlayerPicker = async () => {
+    setCoPickerSearch("");
+    setBookingModalVisible(false);
+
+    const delay = Platform.OS === "ios" ? 180 : 30;
+    setTimeout(() => setCoPickerOpen(true), delay);
+
+    if (allUsers.length === 0) {
+      try {
+        await loadAllUsers();
+      } catch {}
+    }
+  };
+
+  const closeCoPlayerPicker = () => {
+    setCoPickerOpen(false);
+    const delay = Platform.OS === "ios" ? 180 : 30;
+    setTimeout(() => {
+      if (pendingSlot) setBookingModalVisible(true);
+    }, delay);
+  };
+
   const getCourtName = (courtIndex) =>
     COURTS[courtIndex] || `Platz ${courtIndex + 1}`;
 
@@ -1425,132 +1460,150 @@ if (past && !isAdmin) {
 
       <BottomNav navigation={navigation} active="Booking" />
 
-      {/* Booking confirmation sheet */}
-      {bookingModalVisible && pendingSlot && (
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <View style={styles.sheetHandle} />
-
-            <View style={styles.modalTitleRow}>
-              <View style={styles.modalIconWrap}>
-                <Ionicons name="calendar-outline" size={22} color="#F28B25" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.modalTitle}>Buchung bestätigen</Text>
-                <Text style={styles.modalSubline}>Prüfe kurz die Details deiner Reservierung.</Text>
-              </View>
-            </View>
-
-            <View style={styles.bookingSummaryCard}>
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Platz</Text>
-                <Text style={styles.summaryValue}>{getCourtName(pendingSlot.courtIndex).replace("P", "Platz ")}</Text>
-              </View>
-              <View style={styles.summaryDivider} />
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Datum</Text>
-                <Text style={styles.summaryValue}>{formatDate(date)}</Text>
-              </View>
-              <View style={styles.summaryDivider} />
-              <View style={styles.summaryRow}>
-                <Text style={styles.summaryLabel}>Beginn</Text>
-                <Text style={styles.summaryValue}>{pendingSlot.startTime}</Text>
-              </View>
-            </View>
-
-            {!pendingSlot.isSingleSlot ? (
-              <>
-                <Text style={styles.modalLabel}>Ende wählen</Text>
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.endTimeChips}
-                >
-                  {endOptions.map((endTime) => {
-                    const active = selectedEndTime === endTime;
-                    const mins = timeToMinutes(endTime) - timeToMinutes(pendingSlot.startTime);
-                    const duration = mins < 60 ? `${mins} Min.` : `${String(mins / 60).replace(".5", ",5")} Std.`;
-                    return (
-                      <TouchableOpacity
-                        key={endTime}
-                        style={[styles.endTimeOption, active && styles.endTimeOptionActive]}
-                        onPress={() => setSelectedEndTime(endTime)}
-                        activeOpacity={0.85}
-                      >
-                        <Text style={[styles.endTimeText, active && styles.endTimeTextActive]}>{endTime}</Text>
-                        <Text style={[styles.endTimeDuration, active && styles.endTimeDurationActive]}>{duration}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </ScrollView>
-              </>
-            ) : (
-              <View style={styles.singleDurationPill}>
-                <Ionicons name="time-outline" size={16} color="#9FB0C8" />
-                <Text style={styles.singleDurationText}>30 Minuten · keine Verlängerung möglich</Text>
-              </View>
-            )}
-
-            {tournamentBookingMatch && (
-              <View style={styles.vmModalCard}>
-                <View style={styles.vmModalIcon}><Ionicons name="trophy-outline" size={19} color="#F28B25" /></View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.vmModalKicker}>VEREINSMEISTERSCHAFT · {tournamentBookingMatch.round_name}</Text>
-                  <Text style={styles.vmModalPlayers}>{tournamentBookingMatch.player1_name} vs. {tournamentBookingMatch.player2_name}</Text>
-                </View>
-              </View>
-            )}
-
-            {!tournamentBookingMatch && (<>
-            <Text style={styles.modalLabel}>Mitspieler (optional)</Text>
-            <View style={styles.coPlayerRow}>
-              <View style={styles.coPlayerInputWrap}>
-                <Ionicons name="person-add-outline" size={17} color="#7F93B0" />
-                <TextInput
-                  style={styles.coPlayerInput}
-                  value={coPlayerNameInput}
-                  onChangeText={setCoPlayerNameInput}
-                  placeholder="Name des 2. Spielers"
-                  placeholderTextColor="#7F93B0"
-                />
-              </View>
-
-              <TouchableOpacity
-                style={styles.coPickBtn}
-                onPress={async () => {
-                  setCoPickerSearch("");
-                  setCoPickerOpen(true);
-                  if (allUsers.length === 0) await loadAllUsers();
-                }}
-                activeOpacity={0.85}
+      {/* Booking confirmation sheet: echtes Modal statt absolutem Overlay.
+          Das verhindert auf kleinen/älteren Android-Browsern den Zustand
+          „schwarzer Hintergrund, Sheet außerhalb des sichtbaren Viewports“. */}
+      <Modal
+        visible={bookingModalVisible && !!pendingSlot}
+        transparent
+        animationType="fade"
+        statusBarTranslucent={Platform.OS === "android"}
+        onRequestClose={handleCancelBookingRange}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === "ios" ? "padding" : undefined}
+        >
+          {pendingSlot && (
+            <View style={styles.modalBox}>
+              <ScrollView
+                style={styles.bookingModalScroll}
+                contentContainerStyle={styles.bookingModalContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                bounces={false}
               >
-                <Ionicons name="search-outline" size={18} color="#FFFFFF" />
-              </TouchableOpacity>
+                <View style={styles.sheetHandle} />
+
+                <View style={styles.modalTitleRow}>
+                  <View style={styles.modalIconWrap}>
+                    <Ionicons name="calendar-outline" size={22} color="#F28B25" />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={styles.modalTitle}>Buchung bestätigen</Text>
+                    <Text style={styles.modalSubline}>Prüfe kurz die Details deiner Reservierung.</Text>
+                  </View>
+                </View>
+
+                <View style={styles.bookingSummaryCard}>
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Platz</Text>
+                    <Text style={styles.summaryValue}>{getCourtName(pendingSlot.courtIndex).replace("P", "Platz ")}</Text>
+                  </View>
+                  <View style={styles.summaryDivider} />
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Datum</Text>
+                    <Text style={styles.summaryValue}>{formatDate(date)}</Text>
+                  </View>
+                  <View style={styles.summaryDivider} />
+                  <View style={styles.summaryRow}>
+                    <Text style={styles.summaryLabel}>Beginn</Text>
+                    <Text style={styles.summaryValue}>{pendingSlot.startTime}</Text>
+                  </View>
+                </View>
+
+                {!pendingSlot.isSingleSlot ? (
+                  <>
+                    <Text style={styles.modalLabel}>Ende wählen</Text>
+                    <ScrollView
+                      horizontal
+                      showsHorizontalScrollIndicator={false}
+                      contentContainerStyle={styles.endTimeChips}
+                      nestedScrollEnabled
+                    >
+                      {endOptions.map((endTime) => {
+                        const active = selectedEndTime === endTime;
+                        const mins = timeToMinutes(endTime) - timeToMinutes(pendingSlot.startTime);
+                        const duration = mins < 60 ? `${mins} Min.` : `${String(mins / 60).replace(".5", ",5")} Std.`;
+                        return (
+                          <TouchableOpacity
+                            key={endTime}
+                            style={[styles.endTimeOption, active && styles.endTimeOptionActive]}
+                            onPress={() => setSelectedEndTime(endTime)}
+                            activeOpacity={0.85}
+                          >
+                            <Text style={[styles.endTimeText, active && styles.endTimeTextActive]}>{endTime}</Text>
+                            <Text style={[styles.endTimeDuration, active && styles.endTimeDurationActive]}>{duration}</Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  </>
+                ) : (
+                  <View style={styles.singleDurationPill}>
+                    <Ionicons name="time-outline" size={16} color="#9FB0C8" />
+                    <Text style={styles.singleDurationText}>30 Minuten · keine Verlängerung möglich</Text>
+                  </View>
+                )}
+
+                {tournamentBookingMatch && (
+                  <View style={styles.vmModalCard}>
+                    <View style={styles.vmModalIcon}><Ionicons name="trophy-outline" size={19} color="#F28B25" /></View>
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                      <Text style={styles.vmModalKicker}>VEREINSMEISTERSCHAFT · {tournamentBookingMatch.round_name}</Text>
+                      <Text style={styles.vmModalPlayers}>{tournamentBookingMatch.player1_name} vs. {tournamentBookingMatch.player2_name}</Text>
+                    </View>
+                  </View>
+                )}
+
+                {!tournamentBookingMatch && (<>
+                  <Text style={styles.modalLabel}>Mitspieler (optional)</Text>
+                  <View style={styles.coPlayerRow}>
+                    <View style={styles.coPlayerInputWrap}>
+                      <Ionicons name="person-add-outline" size={17} color="#7F93B0" />
+                      <TextInput
+                        style={styles.coPlayerInput}
+                        value={coPlayerNameInput}
+                        onChangeText={setCoPlayerNameInput}
+                        placeholder="Name des 2. Spielers"
+                        placeholderTextColor="#7F93B0"
+                      />
+                    </View>
+
+                    <TouchableOpacity
+                      style={styles.coPickBtn}
+                      onPress={openCoPlayerPicker}
+                      activeOpacity={0.85}
+                    >
+                      <Ionicons name="search-outline" size={18} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  </View>
+                </>)}
+
+                <TouchableOpacity
+                  style={styles.confirmBookingBtn}
+                  onPress={handleConfirmBookingRange}
+                  activeOpacity={0.88}
+                >
+                  <Ionicons name="checkmark-circle-outline" size={20} color="#001738" />
+                  <Text style={styles.confirmBookingText}>Buchung bestätigen</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.cancelBookingBtn} onPress={handleCancelBookingRange} activeOpacity={0.8}>
+                  <Text style={styles.cancelBookingText}>Abbrechen</Text>
+                </TouchableOpacity>
+              </ScrollView>
             </View>
-            </>)}
-
-            <TouchableOpacity
-              style={styles.confirmBookingBtn}
-              onPress={handleConfirmBookingRange}
-              activeOpacity={0.88}
-            >
-              <Ionicons name="checkmark-circle-outline" size={20} color="#001738" />
-              <Text style={styles.confirmBookingText}>Buchung bestätigen</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.cancelBookingBtn} onPress={handleCancelBookingRange} activeOpacity={0.8}>
-              <Text style={styles.cancelBookingText}>Abbrechen</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
+          )}
+        </KeyboardAvoidingView>
+      </Modal>
 
       {coPickerOpen && (
         <Modal
           visible={coPickerOpen}
           transparent
           animationType="fade"
-          onRequestClose={() => setCoPickerOpen(false)}
+          onRequestClose={closeCoPlayerPicker}
         >
           <View style={styles.modalOverlay}>
             <View style={styles.modalBox}>
@@ -1591,7 +1644,7 @@ if (past && !isAdmin) {
                         style={styles.coUserRow}
                         onPress={() => {
                           setCoPlayerNameInput(u.name);
-                          setCoPickerOpen(false);
+                          closeCoPlayerPicker();
                         }}
                         activeOpacity={0.85}
                       >
@@ -1605,7 +1658,7 @@ if (past && !isAdmin) {
                 </ScrollView>
               )}
 
-              <TouchableOpacity style={styles.cancelBookingBtn} onPress={() => setCoPickerOpen(false)}>
+              <TouchableOpacity style={styles.cancelBookingBtn} onPress={closeCoPlayerPicker}>
                 <Text style={styles.cancelBookingText}>Schließen</Text>
               </TouchableOpacity>
             </View>
@@ -1762,15 +1815,12 @@ const styles = StyleSheet.create({
   nowLine: { height: 2, backgroundColor: "#F28B25", borderRadius: 2, flex: 1, opacity: 0.95 },
 
   modalOverlay: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    top: 0,
+    flex: 1,
     backgroundColor: "rgba(0, 8, 20, 0.72)",
     justifyContent: "flex-end",
     alignItems: "center",
-    zIndex: 100,
+    paddingTop: 18,
+    paddingBottom: Platform.OS === "web" ? 12 : 18,
   },
   modalBox: {
     backgroundColor: "#071F3D",
@@ -1781,10 +1831,12 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     paddingBottom: Platform.OS === "ios" ? 30 : 22,
     borderRadius: 24,
-    marginBottom: Platform.OS === "web" ? 14 : 10,
     borderWidth: 1,
     borderColor: "#19456F",
+    overflow: "hidden",
   },
+  bookingModalScroll: { width: "100%" },
+  bookingModalContent: { paddingBottom: 2 },
   sheetHandle: { width: 44, height: 4, borderRadius: 2, backgroundColor: "#33516F", alignSelf: "center", marginBottom: 14 },
   modalTitleRow: { flexDirection: "row", gap: 11, alignItems: "center", marginBottom: 14 },
   modalIconWrap: { width: 42, height: 42, borderRadius: 14, backgroundColor: "rgba(242,139,37,0.10)", alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(242,139,37,0.25)" },
